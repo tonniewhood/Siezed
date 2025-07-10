@@ -1,9 +1,16 @@
 [package]
-name = "rusty_engine"
+name = "Seized"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+clap = { version = "4.3.0", features = ["derive"] }
 softbuffer = "0.4.6"
 thiserror = "2.0.12"
 winit = "0.30.11"
+
+# [workspace]
+# members = [
+#     "src",
+#     "practice/rust",
+# ]
