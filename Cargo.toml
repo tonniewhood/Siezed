@@ -1,0 +1,9 @@
+[package]
+name = "rusty_engine"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+softbuffer = "0.4.6"
+thiserror = "2.0.12"
+winit = "0.30.11"
