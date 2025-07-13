@@ -1,9 +1,10 @@
 [package]
-name = "Seized"
+name = "seized"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1.0.80"
 clap = { version = "4.3.0", features = ["derive"] }
 softbuffer = "0.4.6"
 thiserror = "2.0.12"
