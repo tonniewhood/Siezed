@@ -20,4 +20,7 @@ pub struct Args {
 
     #[arg(long, value_name = "RGB", value_parser=parse_hex_color, default_value="0")]
     pub color: Option<u32>,
+
+    #[arg(long, help = "Unlock the aspect ratio")]
+    pub no_aspect: bool,
 }

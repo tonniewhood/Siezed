@@ -1,9 +1,5 @@
 use anyhow::Ok;
 
-use crate::practice_utils::image::{self, Pixel};
-
-use super::Image;
-
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek};
 use std::path::Path;
@@ -35,7 +31,7 @@ fn read_token<R: BufRead>(reader: &mut R) -> anyhow::Result<String> {
     Ok(String::from_utf8(buf).expect("header is ASCII"))
 }
 
-pub fn parse_ppm(path: &Path) -> anyhow::Result<Image> {
+pub fn parse_ppm(path: &Path, no_aspect: bool) -> anyhow::Result<super::Image> {
     let mut file_buf = BufReader::new(File::open(path)?);
 
     // magic ("P6" or "P3")
@@ -79,27 +75,25 @@ pub fn parse_ppm(path: &Path) -> anyhow::Result<Image> {
             "Width by Height dimensions must match the image data",
         ));
     }
-    let mut rgb_data = vec![image::Pixel::default(); num_pixels];
-    let mut argb_data = vec![0u32; num_pixels];
+    let mut rgb_data = vec![super::Pixel::default(); num_pixels];
     let mut pixel_buf: [u8; 3] = [0; 3];
 
     // Iterate over the image data in chunks of 3 bytes (R, G, B)
     for idx in 0..num_pixels {
         file_buf.read_exact(&mut pixel_buf)?;
-        let pixel = Pixel {
-            a: 0xFF,
-            r: pixel_buf[0],
-            g: pixel_buf[1],
-            b: pixel_buf[2],
-        };
-        rgb_data[idx] = pixel;
-        argb_data[idx] = image::Image::to_argb(pixel);
+        rgb_data[idx].r = pixel_buf[0];
+        rgb_data[idx].g = pixel_buf[1];
+        rgb_data[idx].b = pixel_buf[2];
+        rgb_data[idx].argb = 0xFF << 24
+            | (pixel_buf[0] as u32) << 16
+            | (pixel_buf[1] as u32) << 8
+            | (pixel_buf[2] as u32);
     }
 
-    Ok(Image {
+    Ok(super::Image {
         width: width as u32,
         height: height as u32,
         image_data: rgb_data,
-        argb_data: argb_data,
+        locked_aspect_ratio: !no_aspect,
     })
 }

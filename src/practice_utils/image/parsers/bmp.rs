@@ -1,8 +1,6 @@
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::Path;
-
-use crate::practice_utils::image::{Image, Pixel};
 
 #[allow(non_camel_case_types)]
 pub enum CompressionType {
@@ -11,6 +9,7 @@ pub enum CompressionType {
     BI_RLE4,
 }
 
+#[derive(Debug)]
 pub struct HeaderData {
     pub file_size: u32,
     pub data_start: u32,
@@ -22,7 +21,7 @@ pub struct HeaderData {
     pub compressed_image_size: u32,
     pub colors_used: u32,
     pub number_important_colors: u32,
-    pub all_colors: Vec<Pixel>,
+    pub all_colors: Vec<super::Pixel>,
 }
 
 impl HeaderData {
@@ -81,7 +80,7 @@ impl HeaderData {
         let mut color_table = vec![0u8; colors_used as usize * 3];
         reader.read_exact(&mut color_table)?;
 
-        let mut all_colors = vec![Pixel::default(); colors_used as usize];
+        let mut all_colors = vec![super::Pixel::default(); colors_used as usize];
         for (idx, pixel) in all_colors.iter_mut().enumerate() {
             pixel.r = header[0x36 + idx * 3];
             pixel.g = header[0x37 + idx * 3];
@@ -114,34 +113,46 @@ impl HeaderData {
 // pub fn bit16_RGB(data: &HeaderData) -> anyhow::Result<Image> {}
 
 #[allow(non_snake_case)]
-pub fn bit24_RGB<R: BufRead>(data: &HeaderData, reader: &mut R) -> anyhow::Result<Image> {
-    // TODO: This is hacky, but I want to see the bird lol
+pub fn bit24_RGB<R: BufRead + Seek>(
+    data: &HeaderData,
+    reader: &mut R,
+    no_aspect: bool,
+) -> anyhow::Result<super::Image> {
+    reader.seek(SeekFrom::Start(data.data_start as u64))?;
 
     let mut rgb_bytes: [u8; 3] = [0; 3];
-    let mut rgb_data = vec![Pixel::default(); data.width as usize * data.height as usize];
-    let mut argb_data = vec![0u32; data.width as usize * data.height as usize];
+    let mut rgb_data = vec![super::Pixel::default(); data.width as usize * data.height as usize];
 
-    for pixel_idx in 0..((data.width * data.height) as usize) {
-        reader.read_exact(&mut rgb_bytes)?;
-        let pixel = Pixel {
-            a: 0xFF,
-            r: rgb_bytes[0],
-            g: rgb_bytes[1],
-            b: rgb_bytes[2],
-        };
-        rgb_data[pixel_idx] = pixel;
-        argb_data[pixel_idx] = Image::to_argb(pixel);
+    for scan_row in (0..(data.height as usize)).rev() {
+        for scan_col in 0..(data.width as usize) {
+            reader.read_exact(&mut rgb_bytes)?;
+            let pixel_idx = scan_row * data.width as usize + scan_col;
+            rgb_data[pixel_idx].r = rgb_bytes[2];
+            rgb_data[pixel_idx].g = rgb_bytes[1];
+            rgb_data[pixel_idx].b = rgb_bytes[0];
+            rgb_data[pixel_idx].argb = 0xFF << 24
+                | (rgb_bytes[2] as u32) << 16
+                | (rgb_bytes[1] as u32) << 8
+                | (rgb_bytes[0] as u32);
+        }
+
+        let row_padding = (4 - ((data.width as usize * 3) % 4)) % 4;
+        if row_padding > 0 {
+            reader.consume(row_padding);
+        }
     }
 
-    Ok(Image {
+    println!("Read Image");
+
+    Ok(super::Image {
         width: data.width,
         height: data.height,
         image_data: rgb_data,
-        argb_data: argb_data,
+        locked_aspect_ratio: !no_aspect,
     })
 }
 
-pub fn parse_bmp(filepath: &Path) -> anyhow::Result<Image> {
+pub fn parse_bmp(filepath: &Path, no_aspect: bool) -> anyhow::Result<super::Image> {
     let mut file_reader = BufReader::new(File::open(filepath)?);
 
     let header_data = HeaderData::new(&mut file_reader)?;
@@ -151,7 +162,7 @@ pub fn parse_bmp(filepath: &Path) -> anyhow::Result<Image> {
         // 4 => bit4_palletized_bmp(&header_data),
         // 8 => bit8_palletized_bmp(&header_data),
         // 16 => bit16_RGB(&header_data),
-        24 => bit24_RGB(&header_data, &mut file_reader),
+        24 => bit24_RGB(&header_data, &mut file_reader, no_aspect),
         _ => Err(anyhow::anyhow!(
             "Improper number of bits per pixel {}",
             header_data.bits_per_pixel

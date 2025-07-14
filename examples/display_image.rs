@@ -4,7 +4,7 @@ use clap::Parser;
 
 use winit::event_loop::{ControlFlow::Wait, EventLoop};
 
-use seized::practice_utils::{args, image_parsers, simple_app};
+use seized::practice_utils::{args, image::parsers, simple_app};
 
 fn main() {
     // Explicitly match on the Result:
@@ -25,7 +25,7 @@ fn main() {
         println!("No file provided; Window will be just be static");
         app = simple_app::SimpleApplication::new(args.color.unwrap());
     } else {
-        app = match image_parsers::load_from_path(Path::new(&filepath)) {
+        app = match parsers::load_from_path(Path::new(&filepath), args.no_aspect) {
             Ok(img) => simple_app::SimpleApplication::new(bg_color).with_image(img),
             Err(err) => {
                 eprintln!(

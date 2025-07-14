@@ -7,7 +7,7 @@ use winit::{
     window::{Window, WindowId},
 };
 
-use crate::practice_utils::image;
+use crate::practice_utils::simple_app;
 
 #[derive(thiserror::Error, Debug)]
 pub enum FillError {
@@ -50,14 +50,14 @@ impl FillContext {
     pub fn fill(
         &mut self,
         window: Rc<Window>,
-        image: Rc<image::Image>,
+        frame: &mut simple_app::Frame,
         bg_color: u32,
     ) -> Result<(), FillError> {
         let size = window.inner_size();
 
         let (w, h) = (
-            NonZeroU32::try_from(u32::max(size.width, image.width)).unwrap(),
-            NonZeroU32::try_from(u32::max(size.height, image.height)).unwrap(),
+            NonZeroU32::try_from(u32::max(size.width, frame.width as u32)).unwrap(),
+            NonZeroU32::try_from(u32::max(size.height, frame.height as u32)).unwrap(),
         );
 
         let surf = self.surfaces.entry(window.id()).or_insert_with(|| {
@@ -70,16 +70,16 @@ impl FillContext {
         let mut buf = surf.buffer_mut()?;
         buf.fill(bg_color);
 
-        let vertical_slack = (((h.get()) - image.height) / 2) as usize;
-        let horizontal_slack = (((w.get()) - image.width) / 2) as usize;
+        let vertical_slack = (h.get() as usize - frame.height) / 2;
+        let horizontal_slack = (w.get() as usize - frame.width) / 2;
 
-        for row in 0..(image.height as usize) {
-            let src_start = row * image.width as usize;
-            let src_end = src_start + image.width as usize;
+        for row in 0..frame.height {
+            let src_start = row * frame.width;
+            let src_end = src_start + frame.width;
             let dest_start = (row + vertical_slack) * w.get() as usize + horizontal_slack;
-            let dest_end = dest_start + image.width as usize;
+            let dest_end = dest_start + frame.width;
 
-            buf[dest_start..dest_end].copy_from_slice(&image.argb_data[src_start..src_end]);
+            buf[dest_start..dest_end].copy_from_slice(&frame.buffer[src_start..src_end]);
         }
 
         buf.present()?;

@@ -39,3 +39,9 @@ __pycache__/
 
 # VS Code #
 .vscode/
+
+# Scratch files #
+*.tmp
+*.bak
+*.swp
+Scratch/
