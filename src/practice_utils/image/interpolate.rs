@@ -14,11 +14,12 @@ pub fn interpolate(
     new_height: usize,
     interpolation_type: InterpolationType,
 ) -> anyhow::Result<()> {
-    if img.width as usize == frame.width && img.height as usize == frame.height {
+    if new_width == frame.height && new_height == frame.height {
         return Ok(());
     }
 
     if img.width == 0 || img.height == 0 {
+        eprintln!("Image is emtpy ({}x{})", img.width, img.height);
         return Ok(());
     }
 

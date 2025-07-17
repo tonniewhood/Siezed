@@ -132,6 +132,7 @@ impl ApplicationHandler for SimpleApplication {
         match cause {
             StartCause::ResumeTimeReached { .. } => match self.pending_resize {
                 Some(new_size) => {
+                    // Now perform the high-quality resize after the delay
                     if self
                         .resize_frame(
                             new_size.width as usize,
@@ -152,7 +153,9 @@ impl ApplicationHandler for SimpleApplication {
                         .expect("window context invalid")
                         .request_redraw();
                 }
-                None => {}
+                None => {
+                    eprintln!("Pending size was None");
+                }
             },
             _ => {}
         }
@@ -180,21 +183,15 @@ impl ApplicationHandler for SimpleApplication {
                     .unwrap();
             }
             WindowEvent::Resized(new_size) => {
+                // Start the timer for delayed high-quality resize
                 event_loop.set_control_flow(WaitUntil(time::Instant::now() + self.resize_delay));
                 self.pending_resize = Some(new_size);
-                println!("New requested size: {}x{}", new_size.width, new_size.height);
-                match self.resize_frame(
-                    new_size.width as usize,
-                    new_size.height as usize,
-                    InterpolationType::NearestNeighbor,
-                ) {
-                    Ok(_) => self
-                        .window
-                        .as_ref()
-                        .expect("Window context lost")
-                        .request_redraw(),
-                    Err(err) => eprintln!("Could not resize buffer to requested size: {}", err),
-                }
+                // For immediate feedback, just request a redraw without resizing the frame
+                // This will show the window border with the old frame centered inside
+                self.window
+                    .as_ref()
+                    .expect("Window context lost")
+                    .request_redraw();
             }
             _ => (),
         }

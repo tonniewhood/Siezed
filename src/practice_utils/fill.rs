@@ -2,10 +2,7 @@ use std::{collections::HashMap, num::NonZeroU32, num::TryFromIntError, rc::Rc};
 
 use softbuffer::{Context, SoftBufferError, Surface};
 
-use winit::{
-    dpi::PhysicalSize,
-    window::{Window, WindowId},
-};
+use winit::window::{Window, WindowId};
 
 use crate::practice_utils::simple_app;
 
@@ -56,8 +53,8 @@ impl FillContext {
         let size = window.inner_size();
 
         let (w, h) = (
-            NonZeroU32::try_from(u32::max(size.width, frame.width as u32)).unwrap(),
-            NonZeroU32::try_from(u32::max(size.height, frame.height as u32)).unwrap(),
+            NonZeroU32::try_from(size.width)?,
+            NonZeroU32::try_from(size.height)?,
         );
 
         let surf = self.surfaces.entry(window.id()).or_insert_with(|| {
@@ -65,21 +62,35 @@ impl FillContext {
                 .expect("Error: softbuffer Surface creation failed")
         });
 
-        let _ = window.request_inner_size(PhysicalSize::new(w.get(), h.get()));
         surf.resize(w, h)?;
         let mut buf = surf.buffer_mut()?;
         buf.fill(bg_color);
 
-        let vertical_slack = (h.get() as usize - frame.height) / 2;
-        let horizontal_slack = (w.get() as usize - frame.width) / 2;
+        // Center the frame in the window
+        let vertical_slack = if size.height as usize > frame.height {
+            (size.height as usize - frame.height) / 2
+        } else {
+            0
+        };
+        let horizontal_slack = if size.width as usize > frame.width {
+            (size.width as usize - frame.width) / 2
+        } else {
+            0
+        };
 
-        for row in 0..frame.height {
+        // Only draw the frame if it fits within the window
+        let drawable_height = frame.height.min(size.height as usize);
+        let drawable_width = frame.width.min(size.width as usize);
+
+        for row in 0..drawable_height {
             let src_start = row * frame.width;
-            let src_end = src_start + frame.width;
+            let src_end = src_start + drawable_width;
             let dest_start = (row + vertical_slack) * w.get() as usize + horizontal_slack;
-            let dest_end = dest_start + frame.width;
+            let dest_end = dest_start + drawable_width;
 
-            buf[dest_start..dest_end].copy_from_slice(&frame.buffer[src_start..src_end]);
+            if dest_end <= buf.len() && src_end <= frame.buffer.len() {
+                buf[dest_start..dest_end].copy_from_slice(&frame.buffer[src_start..src_end]);
+            }
         }
 
         buf.present()?;
