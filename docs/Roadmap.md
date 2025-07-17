@@ -4,7 +4,7 @@
    - ASCII & binary modes, 8-bit and 16-bit channels  
    - Centering & drawing into the Softbuffer  
 
-2. **BMP parser**
+2. **BMP parser (✅)**
    - Read BMP header, DIB header, pixel array  
    - Support uncompressed 24-bit; optionally RLE-8 for bonus practice  
 
