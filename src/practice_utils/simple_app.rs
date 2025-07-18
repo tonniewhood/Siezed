@@ -37,29 +37,30 @@ pub struct SimpleApplication {
 }
 
 impl Frame {
-    pub fn new(img: &image::Image, bg_color: u32) -> Self {
+    pub fn new(img: &Rc<RefCell<image::Image>>, bg_color: u32) -> Self {
+        let img_ref = img.borrow();
         Self {
-            width: img.width as usize,
-            height: img.height as usize,
-            buffer: img
+            width: img_ref.width as usize,
+            height: img_ref.height as usize,
+            buffer: img_ref
                 .image_data
                 .iter()
                 .map(|&pixel| image::Image::to_argb(pixel))
                 .collect(),
-            bg_color: bg_color,
+            bg_color,
         }
     }
 
     pub fn resize(&mut self, new_width: usize, new_height: usize) -> bool {
-        if new_height == self.width || new_height == self.height {
-            return false;
+        if new_width == self.width && new_height == self.height {
+            return false; // No change needed
         }
 
         self.width = new_width;
         self.height = new_height;
         self.buffer.resize(new_width * new_height, self.bg_color);
 
-        true
+        true // Resize occurred
     }
 }
 
@@ -97,7 +98,18 @@ impl SimpleApplication {
         self
     }
 
-    pub fn make_frame(mut self, win_width: usize, win_height: usize) -> anyhow::Result<()> {}
+    pub fn make_frame(&mut self, win_width: usize, win_height: usize) {
+        self.frame = Frame::new(&self.image, self.bg_color);
+        if let Err(err) = interpolate(
+            &mut self.frame,
+            self.image.clone(),
+            win_width,
+            win_height,
+            InterpolationType::Bilinear,
+        ) {
+            eprintln!("Error fitting image to the proper size: {}", err);
+        }
+    }
 
     fn resize_frame(
         &mut self,
@@ -115,7 +127,9 @@ impl SimpleApplication {
     }
 
     /// Creates a basic toolbar on the window
-    fn create_toolbar(&mut self) {}
+    fn create_toolbar(&mut self) {
+        println!("Not yet implemented");
+    }
 }
 
 impl Default for SimpleApplication {
@@ -127,7 +141,7 @@ impl Default for SimpleApplication {
             image: Rc::new(RefCell::new(image::Image::default())),
             frame: Frame::default(),
             pending_resize: None,
-            resize_delay: Duration::new(0, 1000000),
+            resize_delay: Duration::new(0, 5000000),
         }
     }
 }
@@ -135,6 +149,7 @@ impl Default for SimpleApplication {
 impl ApplicationHandler for SimpleApplication {
     // Called once the application is ready to create windows
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        println!("resumed() called - creating window");
         let mut attrs = Window::default_attributes();
         attrs.visible = false;
         let img_ref = self.image.borrow();
@@ -154,6 +169,12 @@ impl ApplicationHandler for SimpleApplication {
         );
         self.window = Some(win.clone());
         self.fill = Some(fill::FillContext::new(win.clone()).expect("FillContext creation failed"));
+        let size = self
+            .window
+            .as_ref()
+            .expect("Window context invalid")
+            .inner_size();
+        self.make_frame(size.width as usize, size.height as usize);
 
         self.create_toolbar();
 

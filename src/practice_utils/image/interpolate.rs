@@ -16,6 +16,15 @@ pub fn interpolate(
 ) -> anyhow::Result<()> {
     let img_borrowed = img.borrow();
 
+    // Early exit if source image is empty
+    if img_borrowed.width == 0 || img_borrowed.height == 0 {
+        eprintln!(
+            "Image is empty ({}x{})",
+            img_borrowed.width, img_borrowed.height
+        );
+        return Ok(());
+    }
+
     let (dst_w, dst_h) = if img_borrowed.locked_aspect_ratio {
         let scale = (new_width as f32 / img_borrowed.width as f32)
             .min(new_height as f32 / img_borrowed.height as f32);
@@ -27,17 +36,15 @@ pub fn interpolate(
         (new_width, new_height)
     };
 
-    if frame.resize(dst_w, dst_h) {
+    println!("New desired size: {}x{}", dst_w, dst_h);
+
+    // Early exit if no resize is needed
+    if dst_w == frame.width && dst_h == frame.height {
+        println!("No resize needed, frame already correct size");
         return Ok(());
     }
 
-    if img_borrowed.width == 0 || img_borrowed.height == 0 {
-        eprintln!(
-            "Image is empty ({}x{})",
-            img_borrowed.width, img_borrowed.height
-        );
-        return Ok(());
-    }
+    frame.resize(dst_w, dst_h); // Resize the frame buffer
 
     let x_ratio = img_borrowed.width as f32 / dst_w as f32;
     let y_ratio = img_borrowed.height as f32 / dst_h as f32;
