@@ -103,20 +103,20 @@ impl HeaderData {
     }
 }
 
-pub fn monochrome_bmp(data: &HeaderData) -> anyhow::Result<super::Image> {
+pub fn monochrome_bmp(_data: &HeaderData) -> anyhow::Result<super::Image> {
     panic!("monochrome not implemented yet");
 }
 
-pub fn bit4_palletized_bmp(data: &HeaderData) -> anyhow::Result<super::Image> {
+pub fn bit4_palletized_bmp(_data: &HeaderData) -> anyhow::Result<super::Image> {
     panic!("4 bit palletized not implemented yet");
 }
 
-pub fn bit8_palletized_bmp(data: &HeaderData) -> anyhow::Result<super::Image> {
+pub fn bit8_palletized_bmp(_data: &HeaderData) -> anyhow::Result<super::Image> {
     panic!("8 bit palletized not implemented yet");
 }
 
 #[allow(non_snake_case)]
-pub fn bit16_RGB(data: &HeaderData) -> anyhow::Result<super::Image> {
+pub fn bit16_RGB(_data: &HeaderData) -> anyhow::Result<super::Image> {
     panic!("16 bit RGB not implemented yet");
 }
 

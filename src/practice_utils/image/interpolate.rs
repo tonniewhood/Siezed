@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 use super::{Frame, Image};
 
@@ -9,47 +9,52 @@ pub enum InterpolationType {
 
 pub fn interpolate(
     frame: &mut Frame,
-    img: Rc<Image>,
+    img: Rc<RefCell<Image>>,
     new_width: usize,
     new_height: usize,
     interpolation_type: InterpolationType,
 ) -> anyhow::Result<()> {
-    if new_width == frame.height && new_height == frame.height {
-        return Ok(());
-    }
+    let img_borrowed = img.borrow();
 
-    if img.width == 0 || img.height == 0 {
-        eprintln!("Image is emtpy ({}x{})", img.width, img.height);
-        return Ok(());
-    }
-
-    let (dst_w, dst_h) = if img.locked_aspect_ratio {
-        let scale =
-            (new_width as f32 / img.width as f32).min(new_height as f32 / img.height as f32);
+    let (dst_w, dst_h) = if img_borrowed.locked_aspect_ratio {
+        let scale = (new_width as f32 / img_borrowed.width as f32)
+            .min(new_height as f32 / img_borrowed.height as f32);
         (
-            (img.width as f32 * scale).round() as usize,
-            (img.height as f32 * scale).round() as usize,
+            (img_borrowed.width as f32 * scale).round() as usize,
+            (img_borrowed.height as f32 * scale).round() as usize,
         )
     } else {
         (new_width, new_height)
     };
 
-    frame.resize(dst_w, dst_h);
+    if frame.resize(dst_w, dst_h) {
+        return Ok(());
+    }
 
-    let x_ratio = img.width as f32 / dst_w as f32;
-    let y_ratio = img.height as f32 / dst_h as f32;
+    if img_borrowed.width == 0 || img_borrowed.height == 0 {
+        eprintln!(
+            "Image is empty ({}x{})",
+            img_borrowed.width, img_borrowed.height
+        );
+        return Ok(());
+    }
+
+    let x_ratio = img_borrowed.width as f32 / dst_w as f32;
+    let y_ratio = img_borrowed.height as f32 / dst_h as f32;
 
     match interpolation_type {
         InterpolationType::NearestNeighbor => {
-            nearest_neighbor_interpolation(frame, img, x_ratio, y_ratio)
+            nearest_neighbor_interpolation(frame, &img_borrowed, x_ratio, y_ratio)
         }
-        InterpolationType::Bilinear => bilinear_interpolation(frame, img, x_ratio, y_ratio),
+        InterpolationType::Bilinear => {
+            bilinear_interpolation(frame, &img_borrowed, x_ratio, y_ratio)
+        }
     }
 }
 
 pub fn nearest_neighbor_interpolation(
     frame: &mut Frame,
-    img: Rc<Image>,
+    img: &Image,
     x_ratio: f32,
     y_ratio: f32,
 ) -> anyhow::Result<()> {
@@ -73,7 +78,7 @@ pub fn nearest_neighbor_interpolation(
 
 pub fn bilinear_interpolation(
     frame: &mut Frame,
-    img: Rc<Image>,
+    img: &Image,
     x_ratio: f32,
     y_ratio: f32,
 ) -> anyhow::Result<()> {

@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     rc::Rc,
     time::{self, Duration},
 };
@@ -29,7 +30,7 @@ pub struct SimpleApplication {
     window: Option<Rc<Window>>,
     fill: Option<fill::FillContext>,
     bg_color: u32,
-    pub image: Rc<image::Image>,
+    pub image: Rc<RefCell<image::Image>>,
     pub frame: Frame,
     pending_resize: Option<PhysicalSize<u32>>,
     resize_delay: time::Duration,
@@ -49,20 +50,42 @@ impl Frame {
         }
     }
 
-    pub fn resize(&mut self, new_width: usize, new_height: usize) {
+    pub fn resize(&mut self, new_width: usize, new_height: usize) -> bool {
+        if new_height == self.width || new_height == self.height {
+            return false;
+        }
+
         self.width = new_width;
         self.height = new_height;
         self.buffer.resize(new_width * new_height, self.bg_color);
+
+        true
     }
 }
 
+/// Represents a simple application with window, image, and frame management.
+///
+/// # Fields
+/// - `window`: Optional window handle.
+/// - `fill`: Optional fill property.
+/// - `bg_color`: Background color as a `u32`.
+/// - `image`: Reference-counted image.
+/// - `frame`: Current frame to display.
+/// - `pending_resize`: Optional pending resize event.
+/// - `resize_delay`: Duration to delay resizing operations.
+///
+/// # Methods
+/// - `new`: Creates a new `SimpleApplication` with the specified background color.
+/// - `with_image`: Sets the application's image and updates the frame.
+/// - `resize_frame`: Resizes the current frame using the specified interpolation type.
+/// - `create_toolbar`: Initializes the application's toolbar (currently unimplemented).
 impl SimpleApplication {
     pub fn new(new_color: u32) -> Self {
         Self {
             window: None,
             fill: None,
             bg_color: new_color,
-            image: Rc::new(image::Image::default()),
+            image: Rc::new(RefCell::new(image::Image::default())),
             frame: Frame::default(),
             pending_resize: None,
             resize_delay: Duration::new(0, 1000000),
@@ -70,10 +93,11 @@ impl SimpleApplication {
     }
 
     pub fn with_image(mut self, new_image: image::Image) -> Self {
-        self.image = Rc::new(new_image);
-        self.frame = Frame::new(&self.image, self.bg_color);
+        self.image = Rc::new(RefCell::new(new_image));
         self
     }
+
+    pub fn make_frame(mut self, win_width: usize, win_height: usize) -> anyhow::Result<()> {}
 
     fn resize_frame(
         &mut self,
@@ -89,6 +113,9 @@ impl SimpleApplication {
             interpolation_type,
         )
     }
+
+    /// Creates a basic toolbar on the window
+    fn create_toolbar(&mut self) {}
 }
 
 impl Default for SimpleApplication {
@@ -97,7 +124,7 @@ impl Default for SimpleApplication {
             window: None,
             fill: None,
             bg_color: 0x000000,
-            image: Rc::new(image::Image::default()),
+            image: Rc::new(RefCell::new(image::Image::default())),
             frame: Frame::default(),
             pending_resize: None,
             resize_delay: Duration::new(0, 1000000),
@@ -110,9 +137,12 @@ impl ApplicationHandler for SimpleApplication {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let mut attrs = Window::default_attributes();
         attrs.visible = false;
+        let img_ref = self.image.borrow();
         attrs.inner_size = Some(Size::Physical(
-            LogicalSize::new(self.image.width, self.image.height).to_physical::<u32>(1.0),
+            LogicalSize::new(img_ref.width.max(800), img_ref.height.max(600))
+                .to_physical::<u32>(1.0),
         ));
+        drop(img_ref); // Release the borrow
         attrs.position = Some(Position::Physical(
             LogicalPosition::new(0, 0).to_physical::<i32>(1.0),
         ));
@@ -124,6 +154,8 @@ impl ApplicationHandler for SimpleApplication {
         );
         self.window = Some(win.clone());
         self.fill = Some(fill::FillContext::new(win.clone()).expect("FillContext creation failed"));
+
+        self.create_toolbar();
 
         win.set_visible(true);
     }
@@ -192,6 +224,38 @@ impl ApplicationHandler for SimpleApplication {
                     .as_ref()
                     .expect("Window context lost")
                     .request_redraw();
+            }
+            WindowEvent::KeyboardInput { event, .. } => {
+                if let Some(key) = event.logical_key.to_text() {
+                    if key == "a" && !event.state.is_pressed() {
+                        let current_aspect_locked = self.image.borrow().locked_aspect_ratio;
+                        match current_aspect_locked {
+                            true => {
+                                println!("Unlocking aspect ratio");
+                            }
+                            false => {
+                                println!("Locking aspect ratio");
+                            }
+                        }
+                        self.image.borrow_mut().locked_aspect_ratio = !current_aspect_locked;
+                        let size = self
+                            .window
+                            .as_ref()
+                            .expect("Window context lost")
+                            .inner_size();
+                        if let Err(e) = self.resize_frame(
+                            size.width as usize,
+                            size.height as usize,
+                            InterpolationType::Bilinear,
+                        ) {
+                            eprintln!("Failed to resize frame: {}", e);
+                        }
+                        self.window
+                            .as_ref()
+                            .expect("Window context lost")
+                            .request_redraw();
+                    }
+                }
             }
             _ => (),
         }
