@@ -13,6 +13,7 @@ pub fn interpolate(
     new_width: usize,
     new_height: usize,
     interpolation_type: InterpolationType,
+    pixel_mod: bool,
 ) -> anyhow::Result<()> {
     let img_borrowed = img.borrow();
 
@@ -36,11 +37,8 @@ pub fn interpolate(
         (new_width, new_height)
     };
 
-    println!("New desired size: {}x{}", dst_w, dst_h);
-
     // Early exit if no resize is needed
-    if dst_w == frame.width && dst_h == frame.height {
-        println!("No resize needed, frame already correct size");
+    if dst_w == frame.width && dst_h == frame.height && !pixel_mod {
         return Ok(());
     }
 
@@ -75,8 +73,9 @@ pub fn nearest_neighbor_interpolation(
                 .floor()
                 .clamp(0.0, img.width as f32 - 1.0) as usize;
 
+            let pixel = img.get_pixel(src_x, src_y);
             frame.buffer[dest_row_idx * frame.width + dest_col_idx] =
-                img.get_pixel(src_x, src_y).argb;
+                pixel.to_display_color(img.is_grayscale);
         }
     }
 
@@ -106,8 +105,20 @@ pub fn bilinear_interpolation(
             let pixel_01 = img.get_pixel(x0 as usize, y1 as usize);
             let pixel_11 = img.get_pixel(x1 as usize, y1 as usize);
 
-            let top_blend = pixel_00.lerp(&pixel_10, weight_x);
-            let bttm_blend = pixel_01.lerp(&pixel_11, weight_x);
+            // Apply grayscale conversion if needed, otherwise use original pixels
+            let (p00, p10, p01, p11) = if img.is_grayscale {
+                (
+                    pixel_00.to_grayscale(),
+                    pixel_10.to_grayscale(),
+                    pixel_01.to_grayscale(),
+                    pixel_11.to_grayscale(),
+                )
+            } else {
+                (pixel_00, pixel_10, pixel_01, pixel_11)
+            };
+
+            let top_blend = p00.lerp(&p10, weight_x);
+            let bttm_blend = p01.lerp(&p11, weight_x);
 
             frame.buffer[dest_row_idx * frame.width + dest_col_idx] =
                 top_blend.lerp(&bttm_blend, weight_y).argb;

@@ -45,7 +45,7 @@ impl Frame {
             buffer: img_ref
                 .image_data
                 .iter()
-                .map(|&pixel| image::Image::to_argb(pixel))
+                .map(|&pixel| pixel.to_argb())
                 .collect(),
             bg_color,
         }
@@ -106,9 +106,23 @@ impl SimpleApplication {
             win_width,
             win_height,
             InterpolationType::Bilinear,
+            true,
         ) {
             eprintln!("Error fitting image to the proper size: {}", err);
         }
+    }
+
+    fn update_frame(&mut self) -> anyhow::Result<()> {
+        let old_width = self.frame.width;
+        let old_height = self.frame.height;
+        interpolate(
+            &mut self.frame,
+            self.image.clone(),
+            old_width,
+            old_height,
+            InterpolationType::Bilinear,
+            true,
+        )
     }
 
     fn resize_frame(
@@ -123,7 +137,43 @@ impl SimpleApplication {
             new_width,
             new_height,
             interpolation_type,
+            false,
         )
+    }
+
+    fn toggle_aspect_ratio(&mut self) {
+        let current_aspect_locked = self.image.borrow().locked_aspect_ratio;
+        self.image.borrow_mut().locked_aspect_ratio = !current_aspect_locked;
+        let size = self
+            .window
+            .as_ref()
+            .expect("Window context lost")
+            .inner_size();
+        if let Err(e) = self.resize_frame(
+            size.width as usize,
+            size.height as usize,
+            InterpolationType::Bilinear,
+        ) {
+            eprintln!("Failed to resize frame: {}", e);
+        }
+        self.window
+            .as_ref()
+            .expect("Window context lost")
+            .request_redraw();
+    }
+
+    fn toggle_grayscale(&mut self) {
+        let current_grayscale = self.image.borrow().is_grayscale;
+
+        self.image.borrow_mut().is_grayscale = !current_grayscale;
+        if let Err(e) = self.update_frame() {
+            eprintln!("Failed to regenerate frame: {}", e);
+        }
+
+        self.window
+            .as_ref()
+            .expect("Window context lost")
+            .request_redraw();
     }
 
     /// Creates a basic toolbar on the window
@@ -149,13 +199,18 @@ impl Default for SimpleApplication {
 impl ApplicationHandler for SimpleApplication {
     // Called once the application is ready to create windows
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        println!("resumed() called - creating window");
         let mut attrs = Window::default_attributes();
         attrs.visible = false;
         let img_ref = self.image.borrow();
+        // To get the size of the primary monitor, use ActiveEventLoop::primary_monitor() and MonitorHandle::size()
+        let monitor_size = event_loop
+            .primary_monitor()
+            .and_then(|monitor| Some(monitor.size()))
+            .unwrap_or(PhysicalSize::new(800, 600));
+        let width = img_ref.width.max(800).min(monitor_size.width);
+        let height = img_ref.height.max(600).min(monitor_size.height);
         attrs.inner_size = Some(Size::Physical(
-            LogicalSize::new(img_ref.width.max(800), img_ref.height.max(600))
-                .to_physical::<u32>(1.0),
+            LogicalSize::new(width, height).to_physical::<u32>(1.0),
         ));
         drop(img_ref); // Release the borrow
         attrs.position = Some(Position::Physical(
@@ -247,34 +302,17 @@ impl ApplicationHandler for SimpleApplication {
                     .request_redraw();
             }
             WindowEvent::KeyboardInput { event, .. } => {
-                if let Some(key) = event.logical_key.to_text() {
-                    if key == "a" && !event.state.is_pressed() {
-                        let current_aspect_locked = self.image.borrow().locked_aspect_ratio;
-                        match current_aspect_locked {
-                            true => {
-                                println!("Unlocking aspect ratio");
-                            }
-                            false => {
-                                println!("Locking aspect ratio");
-                            }
+                if let Some(key) = event.logical_key.to_text()
+                    && !event.state.is_pressed()
+                {
+                    match key {
+                        "a" => {
+                            self.toggle_aspect_ratio();
                         }
-                        self.image.borrow_mut().locked_aspect_ratio = !current_aspect_locked;
-                        let size = self
-                            .window
-                            .as_ref()
-                            .expect("Window context lost")
-                            .inner_size();
-                        if let Err(e) = self.resize_frame(
-                            size.width as usize,
-                            size.height as usize,
-                            InterpolationType::Bilinear,
-                        ) {
-                            eprintln!("Failed to resize frame: {}", e);
+                        "g" => {
+                            self.toggle_grayscale();
                         }
-                        self.window
-                            .as_ref()
-                            .expect("Window context lost")
-                            .request_redraw();
+                        _ => {}
                     }
                 }
             }

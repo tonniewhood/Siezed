@@ -78,8 +78,6 @@ impl FillContext {
             0
         };
 
-        println!("Frame dims: {}x{}", frame.width, frame.height);
-
         // Only draw the frame if it fits within the window
         let drawable_height = frame.height.min(size.height as usize);
         let drawable_width = frame.width.min(size.width as usize);
