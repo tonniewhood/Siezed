@@ -96,5 +96,7 @@ pub fn parse_ppm(path: &Path, no_aspect: bool) -> anyhow::Result<super::Image> {
         image_data: rgb_data,
         locked_aspect_ratio: !no_aspect,
         is_grayscale: false,
+        inverted: false,
+        rotation: 0,
     })
 }

@@ -106,7 +106,6 @@ impl SimpleApplication {
             win_width,
             win_height,
             InterpolationType::Bilinear,
-            true,
         ) {
             eprintln!("Error fitting image to the proper size: {}", err);
         }
@@ -121,7 +120,6 @@ impl SimpleApplication {
             old_width,
             old_height,
             InterpolationType::Bilinear,
-            true,
         )
     }
 
@@ -137,7 +135,6 @@ impl SimpleApplication {
             new_width,
             new_height,
             interpolation_type,
-            false,
         )
     }
 
@@ -164,7 +161,6 @@ impl SimpleApplication {
 
     fn toggle_grayscale(&mut self) {
         let current_grayscale = self.image.borrow().is_grayscale;
-
         self.image.borrow_mut().is_grayscale = !current_grayscale;
         if let Err(e) = self.update_frame() {
             eprintln!("Failed to regenerate frame: {}", e);
@@ -176,7 +172,43 @@ impl SimpleApplication {
             .request_redraw();
     }
 
-    /// Creates a basic toolbar on the window
+    fn toggle_inversion(&mut self) {
+        let current_inverted = self.image.borrow().inverted;
+        self.image.borrow_mut().inverted = !current_inverted;
+        if let Err(e) = self.update_frame() {
+            eprintln!("Failed to regenerate frame: {}", e);
+        }
+
+        self.window
+            .as_ref()
+            .expect("Window context lost")
+            .request_redraw();
+    }
+
+    fn rotate(&mut self, rotation: i16, window_size: PhysicalSize<u32>) {
+        let current_rotation = self.image.borrow().rotation;
+        let new_rotation = (current_rotation as i16 + rotation).rem_euclid(360) as u16;
+
+        println!("Rotating from {}° to {}°", current_rotation, new_rotation);
+
+        // Actually store the new rotation value
+        self.image.borrow_mut().rotation = new_rotation;
+
+        // Recalculate frame size based on rotated dimensions
+        if let Err(e) = self.resize_frame(
+            window_size.width as usize,
+            window_size.height as usize,
+            InterpolationType::Bilinear,
+        ) {
+            eprintln!("Failed to resize frame after rotation: {}", e);
+        }
+
+        self.window
+            .as_ref()
+            .expect("Window context lost")
+            .request_redraw();
+    }
+
     fn create_toolbar(&mut self) {
         println!("Not yet implemented");
     }
@@ -311,6 +343,30 @@ impl ApplicationHandler for SimpleApplication {
                         }
                         "g" => {
                             self.toggle_grayscale();
+                        }
+                        "i" => {
+                            self.toggle_inversion();
+                        }
+                        "l" => {
+                            self.rotate(
+                                -90,
+                                self.window
+                                    .as_ref()
+                                    .expect("Window context lost")
+                                    .inner_size(),
+                            );
+                        }
+                        "r" => {
+                            self.rotate(
+                                90,
+                                self.window
+                                    .as_ref()
+                                    .expect("Window context lost")
+                                    .inner_size(),
+                            );
+                        }
+                        "q" => {
+                            event_loop.exit();
                         }
                         _ => {}
                     }
