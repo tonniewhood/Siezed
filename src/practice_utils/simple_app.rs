@@ -6,8 +6,8 @@ use std::{
 
 use winit::{
     application::ApplicationHandler,
-    dpi::{LogicalPosition, LogicalSize, PhysicalSize, Position, Size},
-    event::{StartCause, WindowEvent},
+    dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize, Position, Size},
+    event::{MouseButton, StartCause, WindowEvent},
     event_loop::{
         ActiveEventLoop,
         ControlFlow::{Wait, WaitUntil},
@@ -16,13 +16,16 @@ use winit::{
 };
 
 use super::image::interpolate::{InterpolationType, interpolate};
-use super::{fill, image};
+use super::{fill, image, widgets};
+
+const TOOLBAR_HEIGHT: usize = 40;
 
 #[derive(Default)]
 pub struct Frame {
-    pub width: usize,
-    pub height: usize,
-    pub buffer: Vec<u32>,
+    pub canvas_width: usize,
+    pub canvas_height: usize,
+    pub canvas_buffer: Vec<u32>,
+    pub toolbar: widgets::Toolbar,
     pub bg_color: u32,
 }
 
@@ -34,52 +37,39 @@ pub struct SimpleApplication {
     pub frame: Frame,
     pending_resize: Option<PhysicalSize<u32>>,
     resize_delay: time::Duration,
+    cursor_position: PhysicalPosition<f64>,
 }
 
 impl Frame {
     pub fn new(img: &Rc<RefCell<image::Image>>, bg_color: u32) -> Self {
         let img_ref = img.borrow();
         Self {
-            width: img_ref.width as usize,
-            height: img_ref.height as usize,
-            buffer: img_ref
+            canvas_width: img_ref.width as usize,
+            canvas_height: img_ref.height as usize,
+            canvas_buffer: img_ref
                 .image_data
                 .iter()
                 .map(|&pixel| pixel.to_argb())
                 .collect(),
+            toolbar: widgets::Toolbar::default(),
             bg_color,
         }
     }
 
     pub fn resize(&mut self, new_width: usize, new_height: usize) -> bool {
-        if new_width == self.width && new_height == self.height {
+        if new_width == self.canvas_width && new_height == self.canvas_height {
             return false; // No change needed
         }
 
-        self.width = new_width;
-        self.height = new_height;
-        self.buffer.resize(new_width * new_height, self.bg_color);
+        self.canvas_width = new_width;
+        self.canvas_height = new_height;
+        self.canvas_buffer
+            .resize(new_width * new_height, self.bg_color);
 
         true // Resize occurred
     }
 }
 
-/// Represents a simple application with window, image, and frame management.
-///
-/// # Fields
-/// - `window`: Optional window handle.
-/// - `fill`: Optional fill property.
-/// - `bg_color`: Background color as a `u32`.
-/// - `image`: Reference-counted image.
-/// - `frame`: Current frame to display.
-/// - `pending_resize`: Optional pending resize event.
-/// - `resize_delay`: Duration to delay resizing operations.
-///
-/// # Methods
-/// - `new`: Creates a new `SimpleApplication` with the specified background color.
-/// - `with_image`: Sets the application's image and updates the frame.
-/// - `resize_frame`: Resizes the current frame using the specified interpolation type.
-/// - `create_toolbar`: Initializes the application's toolbar (currently unimplemented).
 impl SimpleApplication {
     pub fn new(new_color: u32) -> Self {
         Self {
@@ -90,6 +80,7 @@ impl SimpleApplication {
             frame: Frame::default(),
             pending_resize: None,
             resize_delay: Duration::new(0, 1000000),
+            cursor_position: PhysicalPosition { x: 0.0, y: 0.0 },
         }
     }
 
@@ -104,16 +95,19 @@ impl SimpleApplication {
             &mut self.frame,
             self.image.clone(),
             win_width,
-            win_height,
+            win_height - TOOLBAR_HEIGHT,
             InterpolationType::Bilinear,
         ) {
             eprintln!("Error fitting image to the proper size: {}", err);
         }
+
+        // Create the toolbar after the frame is set up
+        self.frame.toolbar.update(win_width);
     }
 
     fn update_frame(&mut self) -> anyhow::Result<()> {
-        let old_width = self.frame.width;
-        let old_height = self.frame.height;
+        let old_width = self.frame.canvas_width;
+        let old_height = self.frame.canvas_height;
         interpolate(
             &mut self.frame,
             self.image.clone(),
@@ -129,13 +123,18 @@ impl SimpleApplication {
         new_height: usize,
         interpolation_type: InterpolationType,
     ) -> anyhow::Result<()> {
-        interpolate(
+        let result = interpolate(
             &mut self.frame,
             self.image.clone(),
             new_width,
-            new_height,
+            new_height - TOOLBAR_HEIGHT,
             interpolation_type,
-        )
+        );
+
+        // Recreate the toolbar for the new window size
+        self.frame.toolbar.update(new_width);
+
+        result
     }
 
     fn toggle_aspect_ratio(&mut self) {
@@ -189,8 +188,6 @@ impl SimpleApplication {
         let current_rotation = self.image.borrow().rotation;
         let new_rotation = (current_rotation as i16 + rotation).rem_euclid(360) as u16;
 
-        println!("Rotating from {}° to {}°", current_rotation, new_rotation);
-
         // Actually store the new rotation value
         self.image.borrow_mut().rotation = new_rotation;
 
@@ -208,10 +205,6 @@ impl SimpleApplication {
             .expect("Window context lost")
             .request_redraw();
     }
-
-    fn create_toolbar(&mut self) {
-        println!("Not yet implemented");
-    }
 }
 
 impl Default for SimpleApplication {
@@ -224,6 +217,7 @@ impl Default for SimpleApplication {
             frame: Frame::default(),
             pending_resize: None,
             resize_delay: Duration::new(0, 5000000),
+            cursor_position: PhysicalPosition { x: 0.0, y: 0.0 },
         }
     }
 }
@@ -240,7 +234,9 @@ impl ApplicationHandler for SimpleApplication {
             .and_then(|monitor| Some(monitor.size()))
             .unwrap_or(PhysicalSize::new(800, 600));
         let width = img_ref.width.max(800).min(monitor_size.width);
-        let height = img_ref.height.max(600).min(monitor_size.height);
+        let height = (img_ref.height + TOOLBAR_HEIGHT as u32)
+            .max(600)
+            .min(monitor_size.height);
         attrs.inner_size = Some(Size::Physical(
             LogicalSize::new(width, height).to_physical::<u32>(1.0),
         ));
@@ -262,8 +258,6 @@ impl ApplicationHandler for SimpleApplication {
             .expect("Window context invalid")
             .inner_size();
         self.make_frame(size.width as usize, size.height as usize);
-
-        self.create_toolbar();
 
         win.set_visible(true);
     }
@@ -332,6 +326,52 @@ impl ApplicationHandler for SimpleApplication {
                     .as_ref()
                     .expect("Window context lost")
                     .request_redraw();
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.cursor_position = position;
+                let window_size = self
+                    .window
+                    .as_ref()
+                    .expect("Window context lost")
+                    .inner_size();
+
+                // Check if hovering over toolbar and update accordingly
+                let was_hovering = self.frame.toolbar.on_hover(
+                    position.x as usize,
+                    position.y as usize,
+                    window_size.height as usize,
+                );
+
+                // If not hovering over the button area, reset toolbar to white
+                if !was_hovering && !self.frame.toolbar.button_pressed {
+                    self.frame.toolbar.reset();
+                }
+
+                // Always request redraw to update the visual state
+                self.window
+                    .as_ref()
+                    .expect("Window context lost")
+                    .request_redraw();
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                let window_size = self
+                    .window
+                    .as_ref()
+                    .expect("Window context lost")
+                    .inner_size();
+
+                // println!("Button: {:?}, State: {:?}", button, state);
+
+                // Check if hovering over toolbar and update accordingly
+                if !state.is_pressed() && button == MouseButton::Left {
+                    if self.frame.toolbar.on_click(
+                        self.cursor_position.x as usize,
+                        self.cursor_position.y as usize,
+                        window_size.height as usize,
+                    ) {
+                        self.toggle_inversion();
+                    }
+                }
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if let Some(key) = event.logical_key.to_text()

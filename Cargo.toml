@@ -6,12 +6,7 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.80"
 clap = { version = "4.3.0", features = ["derive"] }
+rusttype = "0.9.3"
 softbuffer = "0.4.6"
 thiserror = "2.0.12"
 winit = "0.30.11"
-
-# [workspace]
-# members = [
-#     "src",
-#     "practice/rust",
-# ]

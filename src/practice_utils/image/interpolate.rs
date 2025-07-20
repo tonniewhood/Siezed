@@ -62,18 +62,18 @@ pub fn nearest_neighbor_interpolation(
 ) -> anyhow::Result<()> {
     let (effective_width, effective_height) = img.get_effective_dimensions();
 
-    for dest_row_idx in 0..frame.height {
+    for dest_row_idx in 0..frame.canvas_height {
         let src_y = (dest_row_idx as f32 * y_ratio)
             .floor()
             .clamp(0.0, effective_height as f32 - 1.0) as usize;
 
-        for dest_col_idx in 0..frame.width {
+        for dest_col_idx in 0..frame.canvas_width {
             let src_x = (dest_col_idx as f32 * x_ratio)
                 .floor()
                 .clamp(0.0, effective_width as f32 - 1.0) as usize;
 
             let pixel = img.get_rotated_pixel(src_x, src_y);
-            frame.buffer[dest_row_idx * frame.width + dest_col_idx] =
+            frame.canvas_buffer[dest_row_idx * frame.canvas_width + dest_col_idx] =
                 pixel.to_display_color(img.is_grayscale, img.inverted);
         }
     }
@@ -100,11 +100,11 @@ pub fn bilinear_interpolation(
     let (sin_t, cos_t) = theta.sin_cos();
     let cx = (img.width as f32 - 1.0) * 0.5;
     let cy = (img.height as f32 - 1.0) * 0.5;
-    let dcx = (frame.width as f32 - 1.0) * 0.5;
-    let dcy = (frame.height as f32 - 1.0) * 0.5;
+    let dcx = (frame.canvas_width as f32 - 1.0) * 0.5;
+    let dcy = (frame.canvas_height as f32 - 1.0) * 0.5;
 
-    for dest_row in 0..frame.height {
-        for dest_col in 0..frame.width {
+    for dest_row in 0..frame.canvas_height {
+        for dest_col in 0..frame.canvas_width {
             let dx = dest_col as f32;
             let dy = dest_row as f32;
 
@@ -141,7 +141,7 @@ pub fn bilinear_interpolation(
             let top_blend = p00.lerp(&p10, weight_x);
             let bttm_blend = p01.lerp(&p11, weight_x);
 
-            frame.buffer[dest_row * frame.width + dest_col] =
+            frame.canvas_buffer[dest_row * frame.canvas_width + dest_col] =
                 top_blend.lerp(&bttm_blend, weight_y).argb;
         }
     }

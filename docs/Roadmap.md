@@ -12,8 +12,7 @@
    - Design a tiny run-length encoding scheme  
    - Parse & render it to see basic compression in action  
 
-4. **Input handling**
-   - Mouse: pan/zoom your image, pick pixels  
+4. **Input handling (✅)**
    - Keyboard: switch formats, apply filters (grayscale, invert)  
    - Bonus: use [`pixels`](https://crates.io/crates/pixels) to keep your CPU buffer but let it handle the GPU upload  
 
