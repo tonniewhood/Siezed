@@ -3,11 +3,10 @@
 #include <stdlib.h>
 #include <stdint.h>
 
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_image.h>
-
 #include <X11/Xlib.h>
 #include <X11/Xcms.h>
+
+#include "../include/tux_image.h"
 
 typedef uint8_t bool;
 #define true 1
@@ -88,38 +87,10 @@ int main()
         return 1;
     }
 
-    bool useImg = false;
-    SDL_Surface *surf;
-    if (SDL_Init(0) < 0)
-    {
-        fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
-    }
-    else if (!(IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG))
-    {
-        fprintf(stderr, "IMG_Init: %s\n", IMG_GetError());
-    }
-    else
-    {
-        SDL_Surface *png = IMG_Load("../../assets/images/tux.png");
-        if (!png)
-        {
-            fprintf(stderr, "IMG_Load: %s\n", IMG_GetError());
-        }
-        else
-        {
-            surf = SDL_ConvertSurfaceFormat(png, SDL_PIXELFORMAT_RGBA32, 0);
-            SDL_FreeSurface(png);
-            if (!surf)
-            {
-                fprintf(stderr, "ConvertSurface: %s\n", SDL_GetError());
-            }
-            else
-            {
-                useImg = true;
-            }
-        }
-    }
+    // Load tux image using the new module
+    TuxImage tux_img = load_tux_image("../../assets/images/tux.png");
 
+    // Create gradient background
     for (int y = 0; y < H; y++)
     {
         for (int x = 0; x < W; x++)
@@ -128,27 +99,13 @@ int main()
             uint8_t g = (uint8_t)(y * 255 / (H - 1));
             uint8_t b = 0x80;
             pixels[y * W + x] = (r << 16) | (g << 8) | b;
-
-            if (useImg && x < surf->w && y < surf->h)
-            {
-                // Get pointer to the pixel data (4 bytes per pixel for RGBA32)
-                uint8_t *pixel_ptr = (uint8_t *)surf->pixels + y * surf->pitch + x * 4;
-
-                // Read RGBA components (SDL_PIXELFORMAT_RGBA32 is R,G,B,A)
-                uint8_t red = pixel_ptr[0];
-                uint8_t green = pixel_ptr[1];
-                uint8_t blue = pixel_ptr[2];
-                uint8_t alpha = pixel_ptr[3];
-
-                // Skip transparent pixels
-                if (alpha == 0)
-                    continue;
-
-                // Convert to X11 format (typically BGRA or ARGB depending on endianness)
-                // For most X11 systems, use ARGB format: 0xAARRGGBB
-                pixels[y * W + x] = (alpha << 24) | (red << 16) | (green << 8) | blue;
-            }
         }
+    }
+
+    // Blend tux image onto the background
+    if (tux_img.success)
+    {
+        blend_tux_image(pixels, W, H, &tux_img, 0, 0);
     }
 
     XImage *img = XCreateImage(
@@ -180,6 +137,9 @@ int main()
             break;
 
         case KeyPress:
+            // Clean up tux image memory
+            free_tux_image(&tux_img);
+            // Clean up X11 resources
             XFreeGC(dpy, strings);
             XCloseDisplay(dpy);
             return 0;

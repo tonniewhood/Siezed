@@ -8,9 +8,9 @@
    - Read BMP header, DIB header, pixel array  
    - Support uncompressed 24-bit; optionally RLE-8 for bonus practice  
 
-3. **Toy RLE-based format** *(optional)*
-   - Design a tiny run-length encoding scheme  
-   - Parse & render it to see basic compression in action  
+3. ~~**Toy RLE-based format** *(optional)*~~
+   - ~~Design a tiny run-length encoding scheme~~  
+   - ~~Parse & render it to see basic compression in action~~  
 
 4. **Input handling (✅)**
    - Keyboard: switch formats, apply filters (grayscale, invert)  
@@ -20,7 +20,7 @@
 
 > *Goal: understand what winit abstracts away.*
 
-- **X11 (XCB or Xlib)**  
+- **X11 (XCB or Xlib) (✅)**  
   1. Open a connection, create a simple window (e.g. `CreateWindow`), map it  
   2. Select & read `KeyPress`, `Expose`, `ConfigureNotify` events  
   3. Draw raw bytes to an XImage or shared memory segment  
