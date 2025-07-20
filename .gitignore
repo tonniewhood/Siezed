@@ -45,3 +45,6 @@ __pycache__/
 *.bak
 *.swp
 Scratch/
+
+# Build directories #
+*build/
