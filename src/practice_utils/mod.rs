@@ -1,5 +1,5 @@
 pub mod args;
 pub mod fill;
+pub mod frame;
 pub mod image;
-pub mod simple_app;
 pub mod widgets;

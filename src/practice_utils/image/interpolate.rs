@@ -1,6 +1,7 @@
 use std::{cell::RefCell, f32::consts::PI, rc::Rc};
 
-use super::{Frame, Image};
+use super::Image;
+use crate::practice_utils::frame::Frame;
 
 pub enum InterpolationType {
     NearestNeighbor,

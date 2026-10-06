@@ -1,7 +1,5 @@
 use std::default::Default;
 
-use super::simple_app::Frame;
-
 pub mod interpolate;
 pub mod parsers;
 

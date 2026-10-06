@@ -2,9 +2,12 @@ use std::{collections::HashMap, num::NonZeroU32, num::TryFromIntError, rc::Rc};
 
 use softbuffer::{Context, SoftBufferError, Surface};
 
-use winit::window::{Window, WindowId};
+use winit::{
+    event_loop::OwnedDisplayHandle,
+    window::{Window, WindowId},
+};
 
-use crate::practice_utils::simple_app;
+use super::frame::Frame;
 
 #[derive(thiserror::Error, Debug)]
 pub enum FillError {
@@ -14,6 +17,8 @@ pub enum FillError {
     SoftBufferError(softbuffer::SoftBufferError),
     #[error("Mismatched sizes: {0}")]
     InvalidDimensionError(String),
+    #[error("Window ID {0:?} wasn't registered")]
+    UnknownWindow(WindowId),
 }
 
 // Implement From for SoftBufferError
@@ -31,40 +36,48 @@ impl From<TryFromIntError> for FillError {
 }
 
 pub struct FillContext {
-    gc: Context<Rc<Window>>,
-    surfaces: HashMap<WindowId, Surface<Rc<Window>, Rc<Window>>>,
+    gc: Context<Rc<OwnedDisplayHandle>>,
+    surfaces: HashMap<WindowId, Surface<Rc<OwnedDisplayHandle>, Rc<Window>>>,
 }
 
 impl FillContext {
-    pub fn new(window: Rc<Window>) -> Result<Self, FillError> {
-        let gc = Context::new(window.clone())?;
+    pub fn new(display_handle: Rc<OwnedDisplayHandle>) -> Result<Self, FillError> {
+        let gc = Context::new(display_handle.clone())?;
         Ok(Self {
-            gc,
+            gc: gc,
             surfaces: HashMap::new(),
         })
     }
 
-    pub fn fill(
-        &mut self,
-        window: Rc<Window>,
-        frame: &mut simple_app::Frame,
-        bg_color: u32,
-    ) -> Result<(), FillError> {
-        let size = window.inner_size();
+    pub fn prepare(_window_id: WindowId) -> Result<(), ()> {
+        Ok(())
+    }
 
+    pub fn register_window(
+        &mut self,
+        window_id: WindowId,
+        window: Rc<Window>,
+    ) -> Result<(), FillError> {
+        let win_surf = Surface::new(&self.gc, window)?;
+        self.surfaces.insert(window_id, win_surf);
+        Ok(())
+    }
+
+    pub fn draw(&mut self, window_id: WindowId, frame: &Frame) -> Result<(), FillError> {
+        let surf = self
+            .surfaces
+            .get_mut(&window_id)
+            .ok_or(FillError::UnknownWindow(window_id))?;
+
+        let size = surf.window().inner_size();
         let (w, h) = (
             NonZeroU32::try_from(size.width)?,
             NonZeroU32::try_from(size.height)?,
         );
 
-        let surf = self.surfaces.entry(window.id()).or_insert_with(|| {
-            Surface::new(&self.gc, window.clone())
-                .expect("Error: softbuffer Surface creation failed")
-        });
-
         surf.resize(w, h)?;
         let mut buf = surf.buffer_mut()?;
-        buf.fill(bg_color);
+        buf.fill(frame.bg_color);
 
         // Center the frame in the window
         let vertical_slack = if size.height as usize > frame.canvas_height {

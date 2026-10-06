@@ -1,6 +1,6 @@
 use rusttype::Font;
 
-const TOOLBAR_HEIGHT: usize = 40;
+pub const TOOLBAR_HEIGHT: usize = 40;
 
 #[derive(Default)]
 pub struct Toolbar {
