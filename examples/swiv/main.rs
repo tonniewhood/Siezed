@@ -1,5 +1,6 @@
+mod args;
+
 use std::{
-    cell::RefCell,
     path::Path,
     rc::Rc,
     time::{self, Duration},
@@ -19,36 +20,33 @@ use winit::{
     window::{Window, WindowId},
 };
 
-use seized::practice_utils::{
-    args, fill,
-    frame::Frame,
-    image::{
-        self,
-        interpolate::{InterpolationType, interpolate},
-        parsers,
-    },
-    widgets::TOOLBAR_HEIGHT,
+use seized::{
+    canvas::BlendMode,
+    fill,
+    image::{self, interpolate::InterpolationType},
+    parsers,
+    widgets::{ImageView, TOOLBAR_HEIGHT, Toolbar},
 };
 
 struct SimpleApplication {
     window: Option<Rc<Window>>,
     fill: Option<fill::FillContext>,
     bg_color: u32,
-    image: Rc<RefCell<image::Image>>,
-    frame: Frame,
+    image_view: ImageView,
+    toolbar: Toolbar,
     pending_resize: Option<PhysicalSize<u32>>,
     resize_delay: time::Duration,
     cursor_position: PhysicalPosition<f64>,
 }
 
 impl SimpleApplication {
-    pub fn new(new_color: u32) -> Self {
+    pub fn new(new_color: u32, locked_aspect: bool) -> Self {
         Self {
             window: None,
             fill: None,
             bg_color: new_color,
-            image: Rc::new(RefCell::new(image::Image::default())),
-            frame: Frame::default(),
+            image_view: ImageView::new(0, 0, Some(locked_aspect), Some(BlendMode::Opaque)),
+            toolbar: Toolbar::new(),
             pending_resize: None,
             resize_delay: Duration::new(0, 1000000),
             cursor_position: PhysicalPosition { x: 0.0, y: 0.0 },
@@ -56,36 +54,31 @@ impl SimpleApplication {
     }
 
     pub fn with_image(mut self, new_image: image::Image) -> Self {
-        self.image = Rc::new(RefCell::new(new_image));
+        self.image_view.set_img(new_image);
         self
     }
 
-    pub fn make_frame(&mut self, win_width: usize, win_height: usize) {
-        self.frame = Frame::new(self.bg_color);
-        if let Err(err) = interpolate(
-            &mut self.frame,
-            self.image.clone(),
-            win_width,
-            win_height - TOOLBAR_HEIGHT,
-            InterpolationType::Bilinear,
-        ) {
+    pub fn update_scene(&mut self, print_errs: bool) {
+        let win_size = self
+            .window
+            .as_ref()
+            .expect("Window context lost")
+            .inner_size();
+        // Without an image there's nothing to rebuild, so the window is just left static
+        if self.image_view.img_ref().is_some()
+            && let Err(err) = self.image_view.rebuild(
+                win_size.width as usize,
+                (win_size.height as usize).saturating_sub(TOOLBAR_HEIGHT),
+                InterpolationType::Bilinear,
+            )
+            && print_errs
+        {
             eprintln!("Error fitting image to the proper size: {}", err);
         }
 
         // Create the toolbar after the frame is set up
-        self.frame.toolbar.update(win_width);
-    }
-
-    fn update_frame(&mut self) -> anyhow::Result<()> {
-        let old_width = self.frame.canvas_width;
-        let old_height = self.frame.canvas_height;
-        interpolate(
-            &mut self.frame,
-            self.image.clone(),
-            old_width,
-            old_height,
-            InterpolationType::Bilinear,
-        )
+        self.toolbar
+            .update(win_size.width as usize, win_size.height as usize);
     }
 
     fn resize_frame(
@@ -94,35 +87,19 @@ impl SimpleApplication {
         new_height: usize,
         interpolation_type: InterpolationType,
     ) -> anyhow::Result<()> {
-        let result = interpolate(
-            &mut self.frame,
-            self.image.clone(),
-            new_width,
-            new_height - TOOLBAR_HEIGHT,
-            interpolation_type,
-        );
-
         // Recreate the toolbar for the new window size
-        self.frame.toolbar.update(new_width);
+        self.toolbar.update(new_width, new_height);
 
-        result
+        self.image_view.rebuild(
+            new_width,
+            new_height.saturating_sub(TOOLBAR_HEIGHT),
+            interpolation_type,
+        )
     }
 
     fn toggle_aspect_ratio(&mut self) {
-        let current_aspect_locked = self.image.borrow().locked_aspect_ratio;
-        self.image.borrow_mut().locked_aspect_ratio = !current_aspect_locked;
-        let size = self
-            .window
-            .as_ref()
-            .expect("Window context lost")
-            .inner_size();
-        if let Err(e) = self.resize_frame(
-            size.width as usize,
-            size.height as usize,
-            InterpolationType::Bilinear,
-        ) {
-            eprintln!("Failed to resize frame: {}", e);
-        }
+        self.image_view.toggle_locked_aspect();
+        self.update_scene(true);
         self.window
             .as_ref()
             .expect("Window context lost")
@@ -130,12 +107,8 @@ impl SimpleApplication {
     }
 
     fn toggle_grayscale(&mut self) {
-        let current_grayscale = self.image.borrow().is_grayscale;
-        self.image.borrow_mut().is_grayscale = !current_grayscale;
-        if let Err(e) = self.update_frame() {
-            eprintln!("Failed to regenerate frame: {}", e);
-        }
-
+        self.image_view.toggle_grayscale();
+        self.update_scene(true);
         self.window
             .as_ref()
             .expect("Window context lost")
@@ -143,34 +116,17 @@ impl SimpleApplication {
     }
 
     fn toggle_inversion(&mut self) {
-        let current_inverted = self.image.borrow().inverted;
-        self.image.borrow_mut().inverted = !current_inverted;
-        if let Err(e) = self.update_frame() {
-            eprintln!("Failed to regenerate frame: {}", e);
-        }
-
+        self.image_view.toggle_inverted();
+        self.update_scene(true);
         self.window
             .as_ref()
             .expect("Window context lost")
             .request_redraw();
     }
 
-    fn rotate(&mut self, rotation: i16, window_size: PhysicalSize<u32>) {
-        let current_rotation = self.image.borrow().rotation;
-        let new_rotation = (current_rotation as i16 + rotation).rem_euclid(360) as u16;
-
-        // Actually store the new rotation value
-        self.image.borrow_mut().rotation = new_rotation;
-
-        // Recalculate frame size based on rotated dimensions
-        if let Err(e) = self.resize_frame(
-            window_size.width as usize,
-            window_size.height as usize,
-            InterpolationType::Bilinear,
-        ) {
-            eprintln!("Failed to resize frame after rotation: {}", e);
-        }
-
+    fn rotate(&mut self, rotation: i16) {
+        self.image_view.rotate(rotation);
+        self.update_scene(true);
         self.window
             .as_ref()
             .expect("Window context lost")
@@ -183,11 +139,11 @@ impl Default for SimpleApplication {
         SimpleApplication {
             window: None,
             fill: None,
-            bg_color: 0x000000,
-            image: Rc::new(RefCell::new(image::Image::default())),
-            frame: Frame::default(),
+            bg_color: 0x0,
+            image_view: ImageView::new(0, 0, Some(true), Some(BlendMode::Opaque)),
+            toolbar: Toolbar::new(),
             pending_resize: None,
-            resize_delay: Duration::new(0, 5000000),
+            resize_delay: Duration::new(0, 1000000),
             cursor_position: PhysicalPosition { x: 0.0, y: 0.0 },
         }
     }
@@ -198,20 +154,26 @@ impl ApplicationHandler for SimpleApplication {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let mut attrs = Window::default_attributes();
         attrs.visible = false;
-        let img_ref = self.image.borrow();
         // To get the size of the primary monitor, use ActiveEventLoop::primary_monitor() and MonitorHandle::size()
         let monitor_size = event_loop
             .primary_monitor()
             .and_then(|monitor| Some(monitor.size()))
             .unwrap_or(PhysicalSize::new(800, 600));
-        let width = img_ref.width.max(800).min(monitor_size.width);
-        let height = (img_ref.height + TOOLBAR_HEIGHT as u32)
-            .max(600)
-            .min(monitor_size.height);
+        let size = match self.image_view.img_size() {
+            // At least 800x600 so small images still get a usable window, at most the
+            // monitor size so large images don't open off-screen
+            Ok((img_width, img_height)) => (
+                img_width.max(800).min(monitor_size.width),
+                (img_height + TOOLBAR_HEIGHT as u32)
+                    .max(600)
+                    .min(monitor_size.height),
+            ),
+            Err(_) => (monitor_size.width.min(800), monitor_size.height.min(600)),
+        };
+
         attrs.inner_size = Some(Size::Physical(
-            LogicalSize::new(width, height).to_physical::<u32>(1.0),
+            LogicalSize::new(size.0, size.1).to_physical::<u32>(1.0),
         ));
-        drop(img_ref); // Release the borrow
         attrs.position = Some(Position::Physical(
             LogicalPosition::new(0, 0).to_physical::<i32>(1.0),
         ));
@@ -228,12 +190,8 @@ impl ApplicationHandler for SimpleApplication {
             .register_window(win.id(), win.clone())
             .expect("Window registration failed");
         self.fill = Some(fill_ctx);
-        let size = self
-            .window
-            .as_ref()
-            .expect("Window context invalid")
-            .inner_size();
-        self.make_frame(size.width as usize, size.height as usize);
+
+        self.update_scene(true);
 
         win.set_visible(true);
     }
@@ -288,7 +246,11 @@ impl ApplicationHandler for SimpleApplication {
                 self.fill
                     .as_mut()
                     .unwrap()
-                    .draw(window_id, &self.frame)
+                    .present(
+                        window_id,
+                        self.bg_color,
+                        &[self.image_view.canvas(), self.toolbar.canvas()],
+                    )
                     .unwrap();
             }
             WindowEvent::Resized(new_size) => {
@@ -311,15 +273,15 @@ impl ApplicationHandler for SimpleApplication {
                     .inner_size();
 
                 // Check if hovering over toolbar and update accordingly
-                let was_hovering = self.frame.toolbar.on_hover(
+                let was_hovering = self.toolbar.on_hover(
                     position.x as usize,
                     position.y as usize,
                     window_size.height as usize,
                 );
 
                 // If not hovering over the button area, reset toolbar to white
-                if !was_hovering && !self.frame.toolbar.button_pressed {
-                    self.frame.toolbar.reset();
+                if !was_hovering && !self.toolbar.btn_pressed() {
+                    self.toolbar.reset();
                 }
 
                 // Always request redraw to update the visual state
@@ -339,7 +301,7 @@ impl ApplicationHandler for SimpleApplication {
 
                 // Check if hovering over toolbar and update accordingly
                 if !state.is_pressed() && button == MouseButton::Left {
-                    if self.frame.toolbar.on_click(
+                    if self.toolbar.on_click(
                         self.cursor_position.x as usize,
                         self.cursor_position.y as usize,
                         window_size.height as usize,
@@ -363,22 +325,10 @@ impl ApplicationHandler for SimpleApplication {
                             self.toggle_inversion();
                         }
                         "l" => {
-                            self.rotate(
-                                -90,
-                                self.window
-                                    .as_ref()
-                                    .expect("Window context lost")
-                                    .inner_size(),
-                            );
+                            self.rotate(-90);
                         }
                         "r" => {
-                            self.rotate(
-                                90,
-                                self.window
-                                    .as_ref()
-                                    .expect("Window context lost")
-                                    .inner_size(),
-                            );
+                            self.rotate(90);
                         }
                         "q" => {
                             event_loop.exit();
@@ -409,15 +359,15 @@ fn main() {
     let bg_color = args.color.unwrap();
     if filepath.is_empty() {
         println!("No file provided; Window will be just be static");
-        app = SimpleApplication::new(args.color.unwrap());
+        app = SimpleApplication::new(args.color.unwrap(), true);
     } else {
-        app = match parsers::load_from_path(Path::new(&filepath), args.no_aspect) {
-            Ok(img) => SimpleApplication::new(bg_color).with_image(img),
+        app = match parsers::load_from_path(Path::new(&filepath)) {
+            Ok(img) => SimpleApplication::new(bg_color, !args.no_aspect).with_image(img),
             Err(err) => {
                 eprintln!(
                     "Could not parse provided image ({err})\nDefaulting to static window with no image"
                 );
-                SimpleApplication::new(bg_color)
+                SimpleApplication::new(bg_color, !args.no_aspect)
             }
         }
     }

@@ -31,12 +31,17 @@ fn read_token<R: BufRead>(reader: &mut R) -> anyhow::Result<String> {
     Ok(String::from_utf8(buf).expect("header is ASCII"))
 }
 
-pub fn parse_ppm(path: &Path, no_aspect: bool) -> anyhow::Result<super::Image> {
+pub fn parse_ppm(path: &Path) -> anyhow::Result<super::Image> {
     let mut file_buf = BufReader::new(File::open(path)?);
 
-    // magic ("P6" or "P3")
+    // magic ("P6" for binary; "P3" is ASCII, which isn't supported yet)
     let magic = read_token(&mut file_buf)?;
-    if magic != "P6" && magic != "P3" {
+    if magic == "P3" {
+        return Err(anyhow::anyhow!(
+            "ASCII (P3) ppm images are not supported yet"
+        ));
+    }
+    if magic != "P6" {
         return Err(anyhow::anyhow!(
             "File not a proper ppm image (Magic bytes mismatch)"
         ));
@@ -75,28 +80,19 @@ pub fn parse_ppm(path: &Path, no_aspect: bool) -> anyhow::Result<super::Image> {
             "Width by Height dimensions must match the image data",
         ));
     }
-    let mut rgb_data = vec![super::Pixel::default(); num_pixels];
+    let mut rgb_data = vec![0; num_pixels];
     let mut pixel_buf: [u8; 3] = [0; 3];
 
     // Iterate over the image data in chunks of 3 bytes (R, G, B)
     for idx in 0..num_pixels {
         file_buf.read_exact(&mut pixel_buf)?;
-        rgb_data[idx].r = pixel_buf[0];
-        rgb_data[idx].g = pixel_buf[1];
-        rgb_data[idx].b = pixel_buf[2];
-        rgb_data[idx].argb = 0xFF << 24
-            | (pixel_buf[0] as u32) << 16
-            | (pixel_buf[1] as u32) << 8
-            | (pixel_buf[2] as u32);
+        rgb_data[idx] =
+            ((pixel_buf[0] as u32) << 16) | ((pixel_buf[1] as u32) << 8) | pixel_buf[2] as u32;
     }
 
     Ok(super::Image {
         width: width as u32,
         height: height as u32,
         image_data: rgb_data,
-        locked_aspect_ratio: !no_aspect,
-        is_grayscale: false,
-        inverted: false,
-        rotation: 0,
     })
 }

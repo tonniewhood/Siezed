@@ -8,14 +8,15 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowAttributes, WindowId};
 
-use seized::practice_utils::{fill, frame::Frame};
+use seized::canvas::{BlendMode, Canvas};
+use seized::fill;
 
 struct SimpleApp {
     window: Option<Rc<Window>>,
     fill_ctx: Option<fill::FillContext>,
-    frame: Frame,
     width: NonZeroU32,
     height: NonZeroU32,
+    canvases: Vec<Canvas>,
 }
 
 impl SimpleApp {
@@ -23,9 +24,9 @@ impl SimpleApp {
         SimpleApp {
             window: None,
             fill_ctx: None,
-            frame: Frame::new(0xFFFFFF),
             width: NonZeroU32::new(800).unwrap(),
             height: NonZeroU32::new(600).unwrap(),
+            canvases: vec![],
         }
     }
 
@@ -55,6 +56,14 @@ impl ApplicationHandler for SimpleApp {
         let window_id = window.as_ref().id();
         let mut fill_ctx =
             fill::FillContext::new(Rc::new(event_loop.owned_display_handle())).unwrap();
+        let mut box_1 = Canvas::new(-25, -25, 50, 50, BlendMode::Opaque);
+        let mut box_2 = Canvas::new(-25, 500, 1000, 200, BlendMode::Alpha);
+        box_1.buffer_mut().fill(0x00FF0000);
+        box_2.buffer_mut().fill(0x7F0000FF);
+
+        self.canvases.push(box_1);
+        self.canvases.push(box_2);
+
         match fill_ctx.register_window(window_id, window.clone()) {
             Ok(()) => (),
             Err(_) => eprintln!("Failed to register window with id: {:?}", window_id),
@@ -71,7 +80,11 @@ impl ApplicationHandler for SimpleApp {
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
-                if let Err(err) = self.fill_ctx.as_mut().unwrap().draw(id, &self.frame) {
+                if let Err(err) = self.fill_ctx.as_mut().unwrap().present(
+                    id,
+                    0x00FFFFFF,
+                    &self.canvases.iter().collect::<Vec<_>>(),
+                ) {
                     eprintln!("Failed to draw frame: {}", err);
                 }
                 self.window.as_ref().unwrap().request_redraw();

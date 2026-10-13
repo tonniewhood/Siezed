@@ -21,7 +21,7 @@ pub struct HeaderData {
     pub compressed_image_size: u32,
     pub colors_used: u32,
     pub number_important_colors: u32,
-    pub all_colors: Vec<super::Pixel>,
+    pub all_colors: Vec<u32>,
 }
 
 impl HeaderData {
@@ -80,11 +80,12 @@ impl HeaderData {
         let mut color_table = vec![0u8; colors_used as usize * 3];
         reader.read_exact(&mut color_table)?;
 
-        let mut all_colors = vec![super::Pixel::default(); colors_used as usize];
+        let mut all_colors = vec![0; colors_used as usize];
         for (idx, pixel) in all_colors.iter_mut().enumerate() {
-            pixel.r = header[0x36 + idx * 3];
-            pixel.g = header[0x37 + idx * 3];
-            pixel.b = header[0x38 + idx * 3];
+            let entry = &color_table[idx * 4..idx * 4 + 4];
+            *pixel = ((entry[0x36 + idx * 3] as u32) << 16)
+                | ((entry[0x37 + idx * 3] as u32) << 8)
+                | entry[0x38 + idx * 3] as u32;
         }
 
         Ok(Self {
@@ -104,43 +105,39 @@ impl HeaderData {
 }
 
 pub fn monochrome_bmp(_data: &HeaderData) -> anyhow::Result<super::Image> {
-    panic!("monochrome not implemented yet");
+    anyhow::bail!("monochrome not implemented")
 }
 
 pub fn bit4_palletized_bmp(_data: &HeaderData) -> anyhow::Result<super::Image> {
-    panic!("4 bit palletized not implemented yet");
+    anyhow::bail!("4 bit palletized not implemented")
 }
 
 pub fn bit8_palletized_bmp(_data: &HeaderData) -> anyhow::Result<super::Image> {
-    panic!("8 bit palletized not implemented yet");
+    anyhow::bail!("8 bit palletized not implemented")
 }
 
 #[allow(non_snake_case)]
 pub fn bit16_RGB(_data: &HeaderData) -> anyhow::Result<super::Image> {
-    panic!("16 bit RGB not implemented yet");
+    anyhow::bail!("16 bit RGB not implemented yet")
 }
 
 #[allow(non_snake_case)]
 pub fn bit24_RGB<R: BufRead + Seek>(
     data: &HeaderData,
     reader: &mut R,
-    no_aspect: bool,
 ) -> anyhow::Result<super::Image> {
     reader.seek(SeekFrom::Start(data.data_start as u64))?;
 
     let mut rgb_bytes: [u8; 3] = [0; 3];
-    let mut rgb_data = vec![super::Pixel::default(); data.width as usize * data.height as usize];
+    let mut rgb_data = vec![0; data.width as usize * data.height as usize];
 
     for scan_row in (0..(data.height as usize)).rev() {
         for scan_col in 0..(data.width as usize) {
             reader.read_exact(&mut rgb_bytes)?;
             let pixel_idx = scan_row * data.width as usize + scan_col;
-            rgb_data[pixel_idx].r = rgb_bytes[2];
-            rgb_data[pixel_idx].g = rgb_bytes[1];
-            rgb_data[pixel_idx].b = rgb_bytes[0];
-            rgb_data[pixel_idx].argb = 0xFF << 24
-                | (rgb_bytes[2] as u32) << 16
-                | (rgb_bytes[1] as u32) << 8
+            rgb_data[pixel_idx] = 0xFF << 24
+                | ((rgb_bytes[2] as u32) << 16)
+                | ((rgb_bytes[1] as u32) << 8)
                 | (rgb_bytes[0] as u32);
         }
 
@@ -154,14 +151,10 @@ pub fn bit24_RGB<R: BufRead + Seek>(
         width: data.width,
         height: data.height,
         image_data: rgb_data,
-        locked_aspect_ratio: !no_aspect,
-        is_grayscale: false,
-        inverted: false,
-        rotation: 0,
     })
 }
 
-pub fn parse_bmp(filepath: &Path, no_aspect: bool) -> anyhow::Result<super::Image> {
+pub fn parse_bmp(filepath: &Path) -> anyhow::Result<super::Image> {
     let mut file_reader = BufReader::new(File::open(filepath)?);
 
     let header_data = HeaderData::new(&mut file_reader)?;
@@ -171,7 +164,7 @@ pub fn parse_bmp(filepath: &Path, no_aspect: bool) -> anyhow::Result<super::Imag
         // 4 => bit4_palletized_bmp(&header_data),
         // 8 => bit8_palletized_bmp(&header_data),
         // 16 => bit16_RGB(&header_data),
-        24 => bit24_RGB(&header_data, &mut file_reader, no_aspect),
+        24 => bit24_RGB(&header_data, &mut file_reader),
         _ => Err(anyhow::anyhow!(
             "Improper number of bits per pixel {}",
             header_data.bits_per_pixel
