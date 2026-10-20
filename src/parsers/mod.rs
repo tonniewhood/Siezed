@@ -1,4 +1,5 @@
 pub mod bmp;
+pub mod mesh;
 pub mod ppm;
 
 use crate::image::Image;

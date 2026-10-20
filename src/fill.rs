@@ -136,6 +136,10 @@ impl FillContext {
         let mut buf = surf.buffer_mut()?;
         buf.fill(bg_color);
 
+        if !canvases.iter().any(|c| c.is_dirty()) {
+            return Ok(());
+        }
+
         for canvas in canvases {
             let (canvas_x, canvas_y) = {
                 let (x, y) = canvas.get_position();
@@ -149,6 +153,7 @@ impl FillContext {
                 i64::from(w.get()),
                 i64::from(h.get()),
             );
+            canvas.set_clean();
         }
 
         buf.present()?;

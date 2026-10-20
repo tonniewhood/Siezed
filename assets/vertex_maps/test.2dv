@@ -1,2 +1,2 @@
-// x1_pos - y1_pos - x2_pos - y2_pos - x3_pos - y2_pos - hex_color
-10 10 20 10 15 10 #FF0000
+// x1_pos - y1_pos - x2_pos - y2_pos - x3_pos - y3_pos - hex_color
+400 100 100 500 700 500 #00FF00
