@@ -4,11 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-anyhow = "1.0.102"
-rusttype = "0.9.3"
-softbuffer = "0.4.8"
-thiserror = "2.0.18"
-winit = "0.30.13"
+anyhow = { version = "1.0.102" }
+rand = { version = "0.10.3" }
+rusttype = { version = "0.9.3" }
+softbuffer = { version = "0.4.8" }
+thiserror = { version = "2.0.18" }
+winit = { version = "0.30.13" }
 
 [dev-dependencies]
 clap = { version = "4.6.1", features = ["derive"] }

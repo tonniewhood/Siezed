@@ -4,6 +4,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek};
 use std::path::Path;
 
+use crate::image::Image;
+
 fn read_token<R: BufRead>(reader: &mut R) -> anyhow::Result<String> {
     let mut buf = Vec::new();
     loop {
@@ -31,7 +33,7 @@ fn read_token<R: BufRead>(reader: &mut R) -> anyhow::Result<String> {
     Ok(String::from_utf8(buf).expect("header is ASCII"))
 }
 
-pub fn parse_ppm(path: &Path) -> anyhow::Result<super::Image> {
+pub fn parse_ppm(path: &Path) -> anyhow::Result<Image> {
     let mut file_buf = BufReader::new(File::open(path)?);
 
     // magic ("P6" for binary; "P3" is ASCII, which isn't supported yet)
@@ -90,7 +92,7 @@ pub fn parse_ppm(path: &Path) -> anyhow::Result<super::Image> {
             ((pixel_buf[0] as u32) << 16) | ((pixel_buf[1] as u32) << 8) | pixel_buf[2] as u32;
     }
 
-    Ok(super::Image {
+    Ok(Image {
         width: width as u32,
         height: height as u32,
         image_data: rgb_data,

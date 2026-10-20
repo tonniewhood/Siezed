@@ -6,6 +6,7 @@ use std::ops::RangeInclusive;
 use std::path::Path;
 
 use crate::canvas::Canvas;
+use crate::math::{Mat3, Vec2, Vec3, matrix};
 use crate::parsers::mesh;
 
 #[derive(Clone, Copy)]
@@ -14,29 +15,14 @@ pub enum DrawType {
     Fill,
 }
 
-#[derive(Default)]
-pub struct Vertex {
-    x: i32,
-    y: i32,
-}
-
-#[derive(Default)]
+#[derive(Default, Clone, Copy)]
 pub struct Triangle {
-    p0: Vertex,
-    p1: Vertex,
-    p2: Vertex,
+    p0: Vec2,
+    p1: Vec2,
+    p2: Vec2,
     color: u32,
     x_bounds: (i32, i32),
     y_bounds: (i32, i32),
-}
-
-impl Vertex {
-    pub fn from_pair(pair: mesh::Pair) -> Vertex {
-        Vertex {
-            x: pair.0,
-            y: pair.1,
-        }
-    }
 }
 
 impl Triangle {
@@ -62,19 +48,29 @@ impl Triangle {
     pub fn y_range(&self) -> RangeInclusive<i32> {
         (self.y_bounds.0)..=(self.y_bounds.1)
     }
+
+    pub fn update_bounds(&mut self) {
+        let x_min = self.p0.x.min(self.p1.x.min(self.p2.x)).round() as i32;
+        let x_max = self.p0.x.max(self.p1.x.max(self.p2.x)).round() as i32;
+        self.x_bounds = (x_min, x_max);
+
+        let y_min = self.p0.y.min(self.p1.y.min(self.p2.y)).round() as i32;
+        let y_max = self.p0.y.max(self.p1.y.max(self.p2.y)).round() as i32;
+        self.y_bounds = (y_min, y_max);
+    }
 }
 
 impl mesh::Polygon for Triangle {
-    fn from_values(x: mesh::Pair, y: mesh::Pair, z: mesh::Pair, color: u32) -> Triangle {
-        let x_min = x.0.min(y.0.min(z.0));
-        let x_max = x.0.max(y.0.max(z.0));
-        let y_min = x.1.min(y.1.min(z.1));
-        let y_max = x.1.max(y.1.max(z.1));
+    fn from_values(a: Vec2, b: Vec2, c: Vec2, color: u32) -> Triangle {
+        let x_min = a.x.min(b.x.min(c.x)).round() as i32;
+        let x_max = a.x.max(b.x.max(c.x)).round() as i32;
+        let y_min = a.y.min(b.y.min(c.y)).round() as i32;
+        let y_max = a.y.max(b.y.max(c.y)).round() as i32;
 
         Triangle {
-            p0: Vertex::from_pair(x),
-            p1: Vertex::from_pair(y),
-            p2: Vertex::from_pair(z),
+            p0: a,
+            p1: b,
+            p2: c,
             color: color,
             x_bounds: (x_min, x_max),
             y_bounds: (y_min, y_max),
@@ -84,14 +80,18 @@ impl mesh::Polygon for Triangle {
 
 #[derive(Default)]
 pub struct Mesh {
-    pub triangles: Vec<Triangle>,
+    triangles: Vec<Triangle>,
+    visible_bounds: [Vec2; 2],
 }
 
 impl Mesh {
     pub fn from_path(mesh_path: &Path) -> io::Result<Mesh> {
         let mut triangles: Vec<Triangle> = Vec::new();
         match mesh::parse_2dv(mesh_path, &mut triangles) {
-            Ok(_) => Ok(Mesh { triangles }),
+            Ok(_) => Ok(Mesh {
+                triangles: triangles,
+                visible_bounds: [Vec2::ZERO, Vec2::ZERO],
+            }),
             Err(err) => Err(err),
         }
     }
@@ -100,83 +100,75 @@ impl Mesh {
         mesh::parse_2dv(mesh_path, self.triangles.as_mut())
     }
 
+    pub fn set_bounds(&mut self, bounds: (u32, u32)) {
+        self.visible_bounds = [
+            Vec2 {
+                x: 0.0,
+                y: bounds.0 as f32,
+            },
+            Vec2 {
+                x: 0.0,
+                y: bounds.1 as f32,
+            },
+        ];
+    }
+
     pub fn triangles(&self) -> &Vec<Triangle> {
         &self.triangles
     }
 
-    fn point_in_dimenstions(&self, p: &Vertex, dims: &(usize, usize)) -> bool {
-        (0 <= p.x && (p.x as usize) < dims.0) && (0 <= p.y && (p.y as usize) < dims.1)
+    pub fn triangles_mut(&mut self) -> &mut Vec<Triangle> {
+        &mut self.triangles
     }
 
-    fn draw_horizontal(&self, p0: &Vertex, p1: &Vertex, color: u32, canvas: &mut Canvas) {
-        let dx = p1.x - p0.x;
-        let mut dy = p1.y - p0.y;
-        let canvas_dims = canvas.get_dimensions();
-
-        let dir = if dy < 0 { -1 } else { 1 };
-        dy *= dir;
-
-        if dx != 0 {
-            let mut y = p0.y;
-            let mut err = 2 * dy - dx;
-
-            for idx in 0..(dx + 1) {
-                let x = p0.x + idx;
-                if (0 <= x && (x as usize) < canvas_dims.0)
-                    && (0 <= y && (y as usize) < canvas_dims.1)
-                {
-                    canvas.set_pixel_value(x as usize, y as usize, color);
+    // Kind of going to be bastardized
+    // In the future will probably be a kind of affine pair
+    pub fn transform(&mut self, transforms: &mut [&mut Vec2], step: f32) {
+        // println!(
+        //     "t1: {:?}, t2: {:?}, t3: {:?}",
+        //     transforms[0], transforms[1], transforms[2]
+        // );
+        let tri = &mut self.triangles[0];
+        for (p, t) in [&mut tri.p0, &mut tri.p1, &mut tri.p2]
+            .into_iter()
+            .zip(transforms)
+        {
+            p.foreach_mut(|idx, x| {
+                let mut new_x = *x + t[idx] * step;
+                if new_x < (self.visible_bounds[idx].x) || (self.visible_bounds[idx].y) < new_x {
+                    new_x = *x - t[idx] * step;
+                    t[idx] = -t[idx];
                 }
 
-                if err >= 0 {
-                    y += dir;
-                    err -= 2 * dx;
-                }
-                err += 2 * dy;
-            }
+                *x = new_x;
+
+                // println!("new_x: {}", *x);
+            });
         }
+
+        self.triangles[0].update_bounds();
     }
 
-    fn draw_vertical(&self, p0: &Vertex, p1: &Vertex, color: u32, canvas: &mut Canvas) {
-        let mut dx = p1.x - p0.x;
-        let dy = p1.y - p0.y;
-        let canvas_dims = canvas.get_dimensions();
-
-        let dir = if dx < 0 { -1 } else { 1 };
-        dx *= dir;
-
-        if dy != 0 {
-            let mut x = p0.x;
-            let mut err = 2 * dx - dy;
-
-            for idx in 0..(dy + 1) {
-                let y = p0.y + idx;
-                let p = Vertex::from_pair((x, y));
-                if self.point_in_dimenstions(&p, &canvas_dims) {
-                    canvas.set_pixel_value(x as usize, y as usize, color);
-                }
-
-                if err >= 0 {
-                    x += dir;
-                    err -= 2 * dy;
-                }
-                err += 2 * dx;
-            }
-        }
+    fn point_in_dimenstions(&self, p: &Vec2) -> bool {
+        (self.visible_bounds[0].x <= p.x && p.x < self.visible_bounds[0].y)
+            && (self.visible_bounds[1].x <= p.y && p.y < self.visible_bounds[1].y)
     }
 
-    fn draw_line(&self, p0: &Vertex, p1: &Vertex, color: u32, canvas: &mut Canvas) {
-        if (p1.x - p0.x).abs() > (p1.y - p0.y).abs() {
-            if p0.x <= p1.x {
-                self.draw_horizontal(p0, p1, color, canvas);
-            } else {
-                self.draw_horizontal(p1, p0, color, canvas);
-            }
+    fn draw_line(&self, p0: &Vec2, p1: &Vec2, color: u32, canvas: &mut Canvas) {
+        let delta = *p1 - *p0;
+        let steps = delta.x.abs().max(delta.y.abs()).round() as usize;
+        let step = if steps == 0 {
+            Vec2::ZERO
         } else {
-            if p0.y <= p1.y {
-                self.draw_vertical(p0, p1, color, canvas);
-            } else {
-                self.draw_vertical(p1, p0, color, canvas);
+            delta / steps as f32
+        };
+
+        for i in 0..=steps {
+            let p = *p0 + step * i as f32;
+            let pixel = Vec2::new(p.x.round(), p.y.round());
+
+            if self.point_in_dimenstions(&pixel) {
+                canvas.set_pixel_value(pixel.x as usize, pixel.y as usize, color);
             }
         }
     }
@@ -189,12 +181,12 @@ impl Mesh {
         }
     }
 
-    fn on_segment(&self, p: &Vertex, a: &Vertex, b: &Vertex) -> bool {
+    fn on_segment(&self, p: &Vec2, a: &Vec2, b: &Vec2) -> bool {
         // Cross product for aread of parallelogram
         let area = (p.x - a.x) * (b.y - a.y) - (p.y - a.y) * (b.x - a.x);
 
         // If the area is non-zero, there exists a paralellogram, so not on
-        if area != 0 {
+        if area.abs() > f32::EPSILON {
             return false;
         }
 
@@ -202,13 +194,13 @@ impl Mesh {
         (a.x.min(b.x) <= p.x && p.x <= a.x.max(b.x)) && (a.y.min(b.y) <= p.y && p.y <= a.y.max(b.y))
     }
 
-    fn point_intersects(&self, p: &Vertex, a: &Vertex, b: &Vertex) -> bool {
+    fn point_intersects(&self, p: &Vec2, a: &Vec2, b: &Vec2) -> bool {
         let height_bounded = (a.y > p.y) != (b.y > p.y);
         if !height_bounded {
             return false;
         }
 
-        if (b.y - a.y) == 0 {
+        if (b.y - a.y).abs() < f32::EPSILON {
             println!("A: ({}, {}), B: ({}, {})", a.x, a.y, b.x, b.y);
         }
 
@@ -217,42 +209,59 @@ impl Mesh {
         projection_hits && height_bounded
     }
 
-    fn is_inside_triangle(&self, p: &Vertex, triangle: &Triangle) -> bool {
-        if self.on_segment(&p, &triangle.p0, &triangle.p1)
-            || self.on_segment(&p, &triangle.p0, &triangle.p2)
-            || self.on_segment(&p, &triangle.p1, &triangle.p2)
-        {
-            return true;
-        }
+    fn compute_barycenter(
+        &self,
+        p: &Vec2,
+        triangle: &Triangle,
+    ) -> Result<Vec3, matrix::MatrixError> {
+        let homogeneous_matrix = Mat3 {
+            x_axis: Vec3 {
+                x: triangle.p0.x,
+                y: triangle.p0.y,
+                z: 1.0,
+            },
+            y_axis: Vec3 {
+                x: triangle.p1.x,
+                y: triangle.p1.y,
+                z: 1.0,
+            },
+            z_axis: Vec3 {
+                x: triangle.p2.x,
+                y: triangle.p2.y,
+                z: 1.0,
+            },
+        };
 
-        let mut inside = false;
-        if self.point_intersects(&p, &triangle.p0, &triangle.p1) {
-            inside = !inside;
-        }
+        let homogenous_point = Vec3 {
+            x: p.x,
+            y: p.y,
+            z: 1.0,
+        };
 
-        if self.point_intersects(&p, &triangle.p0, &triangle.p2) {
-            inside = !inside;
+        match homogeneous_matrix.inv() {
+            Ok(mat) => Ok(mat * homogenous_point),
+            Err(err) => Err(err),
         }
-
-        if self.point_intersects(&p, &triangle.p1, &triangle.p2) {
-            inside = !inside;
-        }
-
-        inside
     }
 
     fn fill_triangles(&self, canvas: &mut Canvas) {
-        let canvas_dims = canvas.get_dimensions();
-
         for triangle in self.triangles.iter() {
             for y in triangle.y_range() {
                 for x in triangle.x_range() {
-                    let p = Vertex::from_pair((x, y));
+                    let p = Vec2 {
+                        x: x as f32,
+                        y: y as f32,
+                    };
 
-                    if self.is_inside_triangle(&p, &triangle)
-                        && self.point_in_dimenstions(&p, &canvas_dims)
-                    {
-                        canvas.set_pixel_value(x as usize, y as usize, triangle.color);
+                    // Yes it's lazy
+                    let barycenter = self.compute_barycenter(&p, triangle).unwrap();
+
+                    if barycenter.all(|x| x >= 0.0) && self.point_in_dimenstions(&p) {
+                        let r = (255.0 * barycenter.x).round() as u32;
+                        let g = (255.0 * barycenter.y).round() as u32;
+                        let b = (255.0 * barycenter.z).round() as u32;
+                        let color = (r << 16) | (g << 8) | b;
+                        canvas.set_pixel_value(x as usize, y as usize, color);
                     }
                 }
             }

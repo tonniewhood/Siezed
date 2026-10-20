@@ -2,20 +2,29 @@ use std::io::Error;
 use std::num::{NonZeroU32, TryFromIntError};
 use std::path::Path;
 use std::rc::Rc;
+use std::time::{self, Instant};
 
 use clap::Parser;
+
+use rand;
+
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::error::EventLoopError;
-use winit::event::WindowEvent;
+use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use seized::canvas::{BlendMode, Canvas};
 use seized::fill;
 use seized::geometry::{DrawType, Mesh};
+use seized::math::Vec2;
 
 mod args;
+
+// Moves at 50 pixels/second
+const SPEED: f32 = 50.0;
 
 struct SimpleApp {
     window: Option<Rc<Window>>,
@@ -26,6 +35,11 @@ struct SimpleApp {
     mesh: Mesh,
     dirty: bool,
     draw_type: DrawType,
+    t: time::Instant,
+    running: bool,
+    p0_dir: Vec2,
+    p1_dir: Vec2,
+    p2_dir: Vec2,
 }
 
 impl SimpleApp {
@@ -39,12 +53,20 @@ impl SimpleApp {
             mesh: Mesh::default(),
             dirty: true,
             draw_type: draw_type,
+            t: time::Instant::now(),
+            running: false,
+            p0_dir: Vec2::ZERO,
+            p1_dir: Vec2::ZERO,
+            p2_dir: Vec2::ZERO,
         }
     }
 
     pub fn with_size(mut self, width: u32, height: u32) -> Result<Self, TryFromIntError> {
         self.width = NonZeroU32::try_from(width)?;
         self.height = NonZeroU32::try_from(height)?;
+
+        self.mesh.set_bounds((width, height));
+
         Ok(self)
     }
 
@@ -58,11 +80,9 @@ impl SimpleApp {
 
     pub fn run(&mut self) -> Result<(), EventLoopError> {
         let event_loop: EventLoop<()> = EventLoop::new().unwrap();
-        event_loop.set_control_flow(ControlFlow::Wait);
+        event_loop.set_control_flow(ControlFlow::Poll);
         event_loop.run_app(self)
     }
-
-    fn reset_mesh() {}
 }
 
 impl ApplicationHandler for SimpleApp {
@@ -90,12 +110,11 @@ impl ApplicationHandler for SimpleApp {
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         match event {
-            WindowEvent::CloseRequested => {
-                event_loop.exit();
-            }
+            WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
                 self.canvas
                     .resize(size.width as usize, size.height as usize);
+                self.mesh.set_bounds((size.width, size.height));
                 self.dirty = true;
                 self.window.as_ref().unwrap().request_redraw();
             }
@@ -114,20 +133,70 @@ impl ApplicationHandler for SimpleApp {
                     eprintln!("Failed to draw frame: {}", err);
                 }
             }
-            WindowEvent::KeyboardInput { event, .. } => {
-                if let Some(key) = event.logical_key.to_text()
-                    && !event.state.is_pressed()
-                {
-                    match key {
-                        "r" => {
-                            self.reset_mesh();
-                        }
-                        _ => {}
+            WindowEvent::KeyboardInput { event, .. } => match event {
+                KeyEvent {
+                    physical_key: PhysicalKey::Code(KeyCode::Space),
+                    state: ElementState::Pressed,
+                    repeat: false,
+                    ..
+                } => {
+                    if !self.running {
+                        self.running = true;
+                        self.t = Instant::now();
+
+                        println!("yeet");
+
+                        self.p0_dir = Vec2 {
+                            x: rand::random_range(-1.0..1.0),
+                            y: rand::random_range(-1.0..1.0),
+                        };
+                        self.p0_dir = self.p0_dir / self.p0_dir.norm();
+
+                        self.p1_dir = Vec2 {
+                            x: rand::random_range(-1.0..1.0),
+                            y: rand::random_range(-1.0..1.0),
+                        };
+                        self.p1_dir = self.p1_dir / self.p1_dir.norm();
+
+                        self.p2_dir = Vec2 {
+                            x: rand::random_range(-1.0..1.0),
+                            y: rand::random_range(-1.0..1.0),
+                        };
+                        self.p2_dir = self.p2_dir / self.p2_dir.norm();
+
+                        println!(
+                            "p0_dir: {:?}, p1_dir: {:?}, p2_dir: {:?}",
+                            self.p0_dir, self.p1_dir, self.p2_dir
+                        );
+                    } else {
+                        self.running = false;
                     }
                 }
-            }
+                _ => {}
+            },
             _ => (),
         }
+    }
+
+    // Ignoring cause for now. With more causes later, I'll probably use it
+    fn new_events(&mut self, _event_loop: &ActiveEventLoop, _cause: winit::event::StartCause) {
+        if !self.running {
+            return;
+        }
+
+        // println!("yote");
+
+        // Get the change since last update
+        let dt = self.t.elapsed();
+        self.t = Instant::now();
+        let step = dt.as_secs_f32() * SPEED;
+        self.mesh.transform(
+            &mut [&mut self.p0_dir, &mut self.p1_dir, &mut self.p2_dir],
+            step,
+        );
+
+        self.dirty = true;
+        self.window.as_ref().unwrap().request_redraw();
     }
 }
 

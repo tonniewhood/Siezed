@@ -2,6 +2,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::Path;
 
+use crate::image::Image;
+
 #[allow(non_camel_case_types)]
 pub enum CompressionType {
     BI_RGB,
@@ -104,28 +106,25 @@ impl HeaderData {
     }
 }
 
-pub fn monochrome_bmp(_data: &HeaderData) -> anyhow::Result<super::Image> {
+pub fn monochrome_bmp(_data: &HeaderData) -> anyhow::Result<Image> {
     anyhow::bail!("monochrome not implemented")
 }
 
-pub fn bit4_palletized_bmp(_data: &HeaderData) -> anyhow::Result<super::Image> {
+pub fn bit4_palletized_bmp(_data: &HeaderData) -> anyhow::Result<Image> {
     anyhow::bail!("4 bit palletized not implemented")
 }
 
-pub fn bit8_palletized_bmp(_data: &HeaderData) -> anyhow::Result<super::Image> {
+pub fn bit8_palletized_bmp(_data: &HeaderData) -> anyhow::Result<Image> {
     anyhow::bail!("8 bit palletized not implemented")
 }
 
 #[allow(non_snake_case)]
-pub fn bit16_RGB(_data: &HeaderData) -> anyhow::Result<super::Image> {
+pub fn bit16_RGB(_data: &HeaderData) -> anyhow::Result<Image> {
     anyhow::bail!("16 bit RGB not implemented yet")
 }
 
 #[allow(non_snake_case)]
-pub fn bit24_RGB<R: BufRead + Seek>(
-    data: &HeaderData,
-    reader: &mut R,
-) -> anyhow::Result<super::Image> {
+pub fn bit24_RGB<R: BufRead + Seek>(data: &HeaderData, reader: &mut R) -> anyhow::Result<Image> {
     reader.seek(SeekFrom::Start(data.data_start as u64))?;
 
     let mut rgb_bytes: [u8; 3] = [0; 3];
@@ -147,14 +146,14 @@ pub fn bit24_RGB<R: BufRead + Seek>(
         }
     }
 
-    Ok(super::Image {
+    Ok(Image {
         width: data.width,
         height: data.height,
         image_data: rgb_data,
     })
 }
 
-pub fn parse_bmp(filepath: &Path) -> anyhow::Result<super::Image> {
+pub fn parse_bmp(filepath: &Path) -> anyhow::Result<Image> {
     let mut file_reader = BufReader::new(File::open(filepath)?);
 
     let header_data = HeaderData::new(&mut file_reader)?;

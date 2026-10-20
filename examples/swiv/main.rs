@@ -23,8 +23,7 @@ use winit::{
 use seized::{
     canvas::BlendMode,
     fill,
-    image::{self, interpolate::InterpolationType},
-    parsers,
+    image::{self, Image, interpolate::InterpolationType},
     widgets::{ImageView, TOOLBAR_HEIGHT, Toolbar},
 };
 
@@ -361,7 +360,7 @@ fn main() {
         println!("No file provided; Window will be just be static");
         app = SimpleApplication::new(args.color.unwrap(), true);
     } else {
-        app = match parsers::load_from_path(Path::new(&filepath)) {
+        app = match Image::load_from_path(Path::new(&filepath)) {
             Ok(img) => SimpleApplication::new(bg_color, !args.no_aspect).with_image(img),
             Err(err) => {
                 eprintln!(
