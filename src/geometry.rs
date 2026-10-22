@@ -149,7 +149,7 @@ impl Mesh {
         self.triangles[0].update_bounds();
     }
 
-    fn point_in_dimenstions(&self, p: &Vec2) -> bool {
+    fn point_in_dimensions(&self, p: &Vec2) -> bool {
         (self.visible_bounds[0].x <= p.x && p.x < self.visible_bounds[0].y)
             && (self.visible_bounds[1].x <= p.y && p.y < self.visible_bounds[1].y)
     }
@@ -167,7 +167,7 @@ impl Mesh {
             let p = *p0 + step * i as f32;
             let pixel = Vec2::new(p.x.round(), p.y.round());
 
-            if self.point_in_dimenstions(&pixel) {
+            if self.point_in_dimensions(&pixel) {
                 canvas.set_pixel_value(pixel.x as usize, pixel.y as usize, color);
             }
         }
@@ -179,34 +179,6 @@ impl Mesh {
             self.draw_line(&triangle.p0, &triangle.p2, triangle.color, canvas);
             self.draw_line(&triangle.p1, &triangle.p2, triangle.color, canvas);
         }
-    }
-
-    fn on_segment(&self, p: &Vec2, a: &Vec2, b: &Vec2) -> bool {
-        // Cross product for aread of parallelogram
-        let area = (p.x - a.x) * (b.y - a.y) - (p.y - a.y) * (b.x - a.x);
-
-        // If the area is non-zero, there exists a paralellogram, so not on
-        if area.abs() > f32::EPSILON {
-            return false;
-        }
-
-        // Validate that the bounds fit
-        (a.x.min(b.x) <= p.x && p.x <= a.x.max(b.x)) && (a.y.min(b.y) <= p.y && p.y <= a.y.max(b.y))
-    }
-
-    fn point_intersects(&self, p: &Vec2, a: &Vec2, b: &Vec2) -> bool {
-        let height_bounded = (a.y > p.y) != (b.y > p.y);
-        if !height_bounded {
-            return false;
-        }
-
-        if (b.y - a.y).abs() < f32::EPSILON {
-            println!("A: ({}, {}), B: ({}, {})", a.x, a.y, b.x, b.y);
-        }
-
-        let projection_hits = p.x < ((b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x);
-
-        projection_hits && height_bounded
     }
 
     fn compute_barycenter(
@@ -256,7 +228,7 @@ impl Mesh {
                     // Yes it's lazy
                     let barycenter = self.compute_barycenter(&p, triangle).unwrap();
 
-                    if barycenter.all(|x| x >= 0.0) && self.point_in_dimenstions(&p) {
+                    if barycenter.all(|x| x >= 0.0) && self.point_in_dimensions(&p) {
                         let r = (255.0 * barycenter.x).round() as u32;
                         let g = (255.0 * barycenter.y).round() as u32;
                         let b = (255.0 * barycenter.z).round() as u32;

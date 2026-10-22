@@ -40,6 +40,14 @@ macro_rules! matrix {
         matrix!(@mm_op $name, Add, Self, add, +, { |m|, $($col: m.$col),+ }); // Add
         matrix!(@mm_op $name, Sub, Self, sub, -, { |m|, $($col: m.$col),+ }); // Sub
 
+        impl ops::Mul<$name> for $name {
+            type Output = Self;
+
+            fn mul(self, m: $name) -> $name {
+                Self{ $($col: self * m.$col),+ }
+            }
+        }
+
         // Vector Ops
         impl ops::Mul<$vec_type> for $name {
             type Output = $vec_type;

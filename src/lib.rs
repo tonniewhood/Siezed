@@ -4,5 +4,6 @@ pub mod fill;
 pub mod geometry;
 pub mod image;
 pub mod math;
+pub mod model;
 pub mod parsers;
 pub mod widgets;
