@@ -181,6 +181,12 @@ impl ops::Mul for Quat {
     }
 }
 
+impl ops::MulAssign for Quat {
+    fn mul_assign(&mut self, rhs: Self) {
+        *self = *self * rhs;
+    }
+}
+
 impl ops::Mul<Vec3> for Quat {
     type Output = Vec3;
     fn mul(self, v: Vec3) -> Vec3 {

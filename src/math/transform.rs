@@ -1,5 +1,6 @@
 use crate::math::{Mat3, Quat, Vec3};
 
+#[derive(Debug)]
 pub struct Pose {
     pub pos: Vec3,
     pub dir: Quat,
@@ -10,6 +11,15 @@ impl Default for Pose {
         Pose {
             pos: Vec3::ZERO,
             dir: Quat::IDENTITY,
+        }
+    }
+}
+
+impl Pose {
+    pub fn with_position(p: Vec3) -> Self {
+        Self {
+            pos: p,
+            dir: Quat::default(),
         }
     }
 }

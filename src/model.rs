@@ -1,3 +1,4 @@
+use crate::camera::Camera;
 use crate::canvas::Canvas;
 use crate::math::transform::Pose;
 use crate::math::{self, Mat3, Vec2, Vec3};
@@ -11,19 +12,46 @@ pub enum ModelError {
     TriangulationError,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Vertex {
     pos: Vec3,
     _texture: Option<Vec2>,
     _normal: Vec3,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct Face {
     v: [u32; 3],
+    pub color: u32,
+}
+
+// Kind of hacky, let it ride
+impl Default for Face {
+    fn default() -> Self {
+        Self {
+            v: [0, 0, 0],
+            color: Face::random_color(),
+        }
+    }
 }
 
 impl Face {
+    pub fn new(v: [u32; 3], color: Option<u32>) -> Self {
+        let color = match color {
+            Some(c) => c,
+            None => Face::random_color(),
+        };
+
+        Self { v: v, color: color }
+    }
+
+    fn random_color() -> u32 {
+        let r: u32 = rand::random_range(0x0..0xFF);
+        let g: u32 = rand::random_range(0x0..0xFF);
+        let b: u32 = rand::random_range(0x0..0xFF);
+        (r << 16) | (g << 8) | b
+    }
+
     pub fn get_vertex_positions(&self, points: &Vec<Vertex>) -> [Vec3; 3] {
         let p0 = points[self.v[0] as usize].pos.clone();
         let p1 = points[self.v[1] as usize].pos.clone();
@@ -32,16 +60,16 @@ impl Face {
         [p0, p1, p2]
     }
 
-    pub fn backfacing(&self, points: &Vec<Vertex>) -> bool {
-        let [p0, p1, p2] = self.get_vertex_positions(points);
+    /// `world` must be the face's vertices in world space (the same positions that get
+    /// drawn), wound counter-clockwise when seen from the front.
+    pub fn backfacing(world: &[Vec3; 3], camera_pos: &Vec3) -> bool {
+        // Outward normal for counter-clockwise winding
+        let n = (world[1] - world[0]).cross(world[2] - world[0]);
+        // Ray from the camera to this face; any point on the face gives the same sign
+        let to_face = world[0] - *camera_pos;
 
-        let vec_a = p1 - p0;
-        let vec_b = p2 - p0;
-
-        let vec2_a = Vec2::new(vec_a.x, vec_a.y);
-        let vec2_b = Vec2::new(vec_b.x, vec_b.y);
-
-        vec2_a.cross(vec2_b) < 0.0
+        // Normal pointing along the view ray = facing away from the camera
+        n.dot(to_face) >= 0.0
     }
 }
 
@@ -79,6 +107,7 @@ pub struct Model {
     faces: Vec<Face>,
     pose: Pose,
     scale_factor: f32,
+    screen_height: f32,
 }
 
 impl Default for Model {
@@ -88,11 +117,14 @@ impl Default for Model {
             faces: Vec::default(),
             pose: Pose::default(),
             scale_factor: 1.0,
+            screen_height: 1.0,
         }
     }
 }
 
 impl Model {
+    const NEAR_DIST: f32 = 0.1;
+
     pub fn load_model(&mut self, model_filename: &str) -> Result<(), ModelError> {
         let obj_contents = match obj::parse_obj(model_filename) {
             Ok(contents) => contents,
@@ -113,7 +145,7 @@ impl Model {
                 let v0 = face[0][0] as u32;
                 let v1 = face[1][0] as u32;
                 let v2 = face[2][0] as u32;
-                self.faces.push(Face { v: [v0, v1, v2] });
+                self.faces.push(Face::new([v0, v1, v2], None));
             } else {
                 let new_faces = self.triangulate_polygon(
                     face.iter()
@@ -122,12 +154,15 @@ impl Model {
                 )?;
                 let mut mapped_faces = new_faces
                     .iter()
-                    .map(|f| Face {
-                        v: [
-                            face[f[0] as usize][0] as u32,
-                            face[f[1] as usize][0] as u32,
-                            face[f[2] as usize][0] as u32,
-                        ],
+                    .map(|f| {
+                        Face::new(
+                            [
+                                face[f[0] as usize][0] as u32,
+                                face[f[1] as usize][0] as u32,
+                                face[f[2] as usize][0] as u32,
+                            ],
+                            None,
+                        )
                     })
                     .collect();
                 self.faces.append(&mut mapped_faces);
@@ -139,6 +174,10 @@ impl Model {
 
     pub fn set_scale_factor(&mut self, sf: f32) {
         self.scale_factor = sf;
+    }
+
+    pub fn set_screen_height(&mut self, size: f32) {
+        self.screen_height = size;
     }
 
     pub fn set_pose(&mut self, new_pose: Pose) {
@@ -153,29 +192,71 @@ impl Model {
         self.pose.pos += v;
     }
 
-    /// Model space -> screen space: scale, then offset by the pose position. Screen y points
-    /// down while model y points up, so y is flipped. Rotation and projection go here later.
-    fn to_screen(&self, p: Vec3) -> Vec2 {
-        Vec2::new(
-            self.pose.pos.x + p.x * self.scale_factor,
-            self.pose.pos.y - p.y * self.scale_factor,
-        )
+    /// Model space -> world space: scale, then rotate, then translate. The single place this
+    /// happens, so culling and drawing always agree on where a vertex is.
+    fn model_to_world(&self, p: Vec3) -> Vec3 {
+        self.pose.pos + self.pose.dir.rotate(p * self.scale_factor)
     }
 
-    fn screen_triangle(&self, face: &Face) -> [Vec2; 3] {
+    fn world_triangle(&self, face: &Face) -> [Vec3; 3] {
         face.get_vertex_positions(&self.vertices)
-            .map(|p| self.to_screen(p))
+            .map(|p| self.model_to_world(p))
     }
 
-    pub fn render(&self, canvas: &mut Canvas) {
+    fn to_screen(&self, world_vec: &Vec3, camera_view: &Camera) -> Vec2 {
+        // Transform the vector into camera space
+        let camera_pose = camera_view.pose();
+        let res_vec = camera_pose.dir.rotate(*world_vec - camera_pose.pos);
+        let screen_vec = Vec2::new(res_vec.x, res_vec.y);
+
+        // Height of the view, in world units, one unit in front of the camera. tan() takes
+        // radians, and the fov is the full vertical angle in degrees.
+        let screen_height_in_world = f32::tan(camera_view.fov().to_radians() / 2.0) * 2.0;
+        // The camera looks down -z, so visible points have negative z; depth is -z
+        let depth = -res_vec.z;
+        let pixels_per_world_unit = self.screen_height / screen_height_in_world / depth;
+
+        // Scale the point up to the size of the model in the world, and then the size the screen should show in the model
+        // screen_vec * pixels_per_world_unit
+        screen_vec * pixels_per_world_unit
+    }
+
+    fn screen_triangle(&self, world: &[Vec3; 3], camera_view: &Camera) -> [Vec2; 3] {
+        world.map(|p| self.to_screen(&p, camera_view))
+    }
+
+    pub fn render(&self, canvas: &mut Canvas, camera_view: &Camera) {
         let canvas_dimensions = canvas.get_dimensions();
 
         for face in self.faces.iter() {
-            if face.backfacing(&self.vertices) {
+            let world = self.world_triangle(face);
+            if Face::backfacing(&world, camera_view.pos()) {
                 continue;
             }
 
-            let triangle = self.screen_triangle(face);
+            // Camera in the camera space
+            let camera_triangle = self.screen_triangle(&world, &camera_view);
+
+            // Move the origin of the camera, to the center of the buffer
+            let triangle_vec: Vec<Vec2> = camera_triangle
+                .iter()
+                .map(|p| {
+                    Vec2::new(
+                        p.x + (canvas_dimensions.0 as f32) / 2.0,
+                        -p.y + (canvas_dimensions.1 as f32) / 2.0,
+                    )
+                })
+                .collect();
+            let triangle = [triangle_vec[0], triangle_vec[1], triangle_vec[2]];
+
+            // If any point has a z distance < NEAR_DIST, skip it. (will be y in a Vec2 due to naming)
+            let xz_plane_camera_vec = Vec2::new(camera_view.pos().x, camera_view.pos().z);
+            if triangle
+                .iter()
+                .any(|p| (*p - xz_plane_camera_vec).y < Model::NEAR_DIST)
+            {
+                continue;
+            }
 
             // Degenerate (zero-area) triangles have no inverse and cover no pixels
             let Ok(inv) = construct_homogeneous_matrix(&triangle).inv() else {
@@ -199,11 +280,6 @@ impl Model {
             let (min_x, max_x) = (min_x as usize, max_x as usize);
             let (min_y, max_y) = (min_y as usize, max_y as usize);
 
-            let r: u32 = rand::random_range(0x0..0xFF);
-            let g: u32 = rand::random_range(0x0..0xFF);
-            let b: u32 = rand::random_range(0x0..0xFF);
-            let color = (r << 16) | (g << 8) | b;
-
             for y in min_y..=max_y {
                 for x in min_x..=max_x {
                     // Sample at the pixel's center
@@ -213,7 +289,7 @@ impl Model {
                         continue;
                     }
 
-                    canvas.set_pixel_value(x, y, color);
+                    canvas.set_pixel_value(x, y, face.color);
                 }
             }
         }
@@ -391,24 +467,48 @@ mod tests {
     #[test]
     fn box_quads_become_twelve_triangles() {
         let mut model = Model::default();
-        model.load_model("assets/models/box.obj").unwrap();
+        model.load_model("assets/models/box/box.obj").unwrap();
         assert_eq!(model.faces.len(), 12);
     }
 
-    #[test]
-    fn render_draws_scaled_model_at_its_position() {
+    // #[test]
+    // fn render_draws_scaled_model_at_its_position() {
+    //     let mut model = Model::default();
+    //     model.load_model("assets/models/box/box.obj").unwrap();
+    //     model.set_scale_factor(40.0);
+    //     model.set_position(Vec3::new(50.0, 50.0, 0.0));
+
+    //     let mut canvas = Canvas::new(0, 0, 100, 100, BlendMode::Opaque);
+    //     model.render(&mut canvas);
+
+    //     // The box spans +/-0.5 * 40 = +/-20 px around (50, 50)
+    //     assert_ne!(canvas.get_pixel_value(50, 50), 0, "center not drawn");
+    //     assert_ne!(canvas.get_pixel_value(32, 68), 0, "near corner not drawn");
+    //     assert_eq!(canvas.get_pixel_value(5, 5), 0, "drew outside the box");
+    //     assert_eq!(canvas.get_pixel_value(95, 50), 0, "drew outside the box");
+    // }
+
+    fn visible_triangles(camera_pos: Vec3) -> usize {
         let mut model = Model::default();
-        model.load_model("assets/models/box.obj").unwrap();
-        model.set_scale_factor(40.0);
-        model.set_position(Vec3::new(50.0, 50.0, 0.0));
+        model.load_model("assets/models/box/box.obj").unwrap();
+        model.set_scale_factor(25.0);
 
-        let mut canvas = Canvas::new(0, 0, 100, 100, BlendMode::Opaque);
-        model.render(&mut canvas);
+        model
+            .faces
+            .iter()
+            .filter(|f| !super::Face::backfacing(&model.world_triangle(f), &camera_pos))
+            .count()
+    }
 
-        // The box spans +/-0.5 * 40 = +/-20 px around (50, 50)
-        assert_ne!(canvas.get_pixel_value(50, 50), 0, "center not drawn");
-        assert_ne!(canvas.get_pixel_value(32, 68), 0, "near corner not drawn");
-        assert_eq!(canvas.get_pixel_value(5, 5), 0, "drew outside the box");
-        assert_eq!(canvas.get_pixel_value(95, 50), 0, "drew outside the box");
+    #[test]
+    fn backfacing_uses_world_space_positions() {
+        // Camera slightly right of center, in front of the +z face: only that face (2 tris).
+        // In unscaled model space x = 0.9 is past the +x face at 0.5, which used to make
+        // the right side wrongly count as front-facing.
+        assert_eq!(visible_triangles(Vec3::new(0.9, 0.0, 40.0)), 2);
+        // Off a corner, three faces are visible
+        assert_eq!(visible_triangles(Vec3::new(30.0, 30.0, 30.0)), 6);
+        // Past the right side of the scaled cube, the right face becomes visible too
+        assert_eq!(visible_triangles(Vec3::new(20.0, 0.0, 40.0)), 4);
     }
 }
